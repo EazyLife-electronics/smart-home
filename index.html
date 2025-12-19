@@ -9,15 +9,37 @@
 
   <style>
     :root{
+      /* Dark theme (default) */
       --bg: #0f1724;
       --card: #0b1220;
       --muted: #94a3b8;
-      --accent: linear-gradient(90deg,#6ee7b7,#3b82f6);
+      --accent-from: #6ee7b7;
+      --accent-to: #3b82f6;
       --glass: rgba(255,255,255,0.04);
       --success: #10b981;
       --danger: #ef4444;
       --surface-1: rgba(255,255,255,0.03);
+      --text: #e6eef8;
       --shadow: 0 8px 24px rgba(2,6,23,0.6);
+      --card-border: rgba(255,255,255,0.02);
+      --track-bg: rgba(255,255,255,0.05);
+    }
+
+    /* Light theme overrides */
+    [data-theme="light"]{
+      --bg: linear-gradient(180deg,#f6f9ff,#ffffff);
+      --card: #ffffff;
+      --muted: #5b6b7a;
+      --accent-from: #10b981;
+      --accent-to: #2563eb;
+      --glass: rgba(2,6,23,0.03);
+      --success: #059669;
+      --danger: #dc2626;
+      --surface-1: rgba(2,6,23,0.02);
+      --text: #0b1220;
+      --shadow: 0 8px 24px rgba(11,18,32,0.06);
+      --card-border: rgba(2,6,23,0.06);
+      --track-bg: rgba(2,6,23,0.06);
     }
 
     *{box-sizing:border-box}
@@ -25,13 +47,15 @@
       height:100%;
       margin:0;
       font-family:"Inter",system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
-      background: radial-gradient(1000px 800px at 10% 10%, rgba(59,130,246,0.08), transparent 10%),
-                  radial-gradient(900px 700px at 90% 90%, rgba(16,185,129,0.05), transparent 10%),
-                  var(--bg);
-      color:#e6eef8;
+      background:
+        radial-gradient(1000px 800px at 10% 10%, rgba(59,130,246,0.08), transparent 10%),
+        radial-gradient(900px 700px at 90% 90%, rgba(16,185,129,0.05), transparent 10%),
+        var(--bg);
+      color:var(--text);
       -webkit-font-smoothing:antialiased;
       -moz-osx-font-smoothing:grayscale;
       padding:16px;
+      transition: background .25s ease, color .25s ease;
     }
 
     header{
@@ -52,14 +76,14 @@
       width:46px;
       height:46px;
       border-radius:10px;
-      background:var(--accent);
+      background:linear-gradient(90deg,var(--accent-from),var(--accent-to));
       display:grid;
       place-items:center;
       font-weight:700;
-      color:#082032;
+      color:var(--bg);
       box-shadow: var(--shadow);
     }
-    h1{font-size:1.05rem;margin:0}
+    h1{font-size:1.05rem;margin:0;color:var(--text)}
     .subtitle{font-size:0.8rem;color:var(--muted);margin-top:2px}
 
     .user-actions{
@@ -78,7 +102,7 @@
       align-items:center;
     }
     .btn{
-      background:linear-gradient(90deg,#3b82f6,#6366f1);
+      background:linear-gradient(90deg,var(--accent-from),var(--accent-to));
       color:white;
       border:none;
       padding:10px 14px;
@@ -92,10 +116,22 @@
     }
     .btn.ghost{
       background:transparent;
-      border:1px solid rgba(255,255,255,0.06);
+      border:1px solid var(--card-border);
       color:var(--muted);
       box-shadow:none;
     }
+    .btn.theme{
+      padding:8px;
+      width:44px;
+      height:44px;
+      border-radius:10px;
+      display:inline-grid;
+      place-items:center;
+      background:transparent;
+      border:1px solid var(--card-border);
+      color:var(--muted);
+    }
+    .btn.theme svg{width:20px;height:20px;display:block}
 
     main{
       max-width:1100px;
@@ -112,12 +148,13 @@
       padding:22px;
       box-shadow:var(--shadow);
     }
+    [data-theme="light"] #loginForm{ background: linear-gradient(180deg, rgba(2,6,23,0.02), transparent); }
     #loginForm label{display:block;color:var(--muted);font-size:0.85rem;margin-bottom:6px}
     #loginForm input{
       width:100%;
       padding:12px 14px;
       border-radius:10px;
-      border:1px solid rgba(255,255,255,0.04);
+      border:1px solid var(--card-border);
       background:transparent;
       color:inherit;
       font-size:1rem;
@@ -150,16 +187,16 @@
       background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
       border-radius:14px;
       padding:18px;
-      box-shadow:0 8px 28px rgba(2,6,23,0.6);
+      box-shadow:var(--shadow);
       min-height:120px;
       display:flex;
       flex-direction:column;
       justify-content:space-between;
-      transition:transform .18s ease, box-shadow .18s ease;
-      border:1px solid rgba(255,255,255,0.02);
+      transition:transform .18s ease, box-shadow .18s ease, background .25s ease, color .25s ease;
+      border:1px solid var(--card-border);
     }
     .card:active{transform:translateY(2px)}
-    .card h2{margin:0;font-size:1.05rem}
+    .card h2{margin:0;font-size:1.05rem;color:var(--text)}
     .card .meta{color:var(--muted);font-size:0.9rem;margin-top:6px}
     .card .status{
       display:flex;
@@ -185,14 +222,15 @@
     }
     .switch input{display:none}
     .switch .track{
-      width:56px;height:30px;border-radius:999px;background:rgba(255,255,255,0.05);padding:4px;cursor:pointer;display:inline-block;transition:all .18s ease;
+      width:56px;height:30px;border-radius:999px;background:var(--track-bg);padding:4px;cursor:pointer;display:inline-block;transition:all .18s ease;
       position:relative;
+      border:1px solid var(--card-border);
     }
     .knob{
       width:22px;height:22px;border-radius:22px;background:white;transform:translateX(0);transition:transform .18s ease;
-      box-shadow: 0 6px 14px rgba(2,6,23,0.6);
+      box-shadow: 0 6px 14px rgba(2,6,23,0.12);
     }
-    .track.on{background:linear-gradient(90deg,#6ee7b7,#3b82f6)}
+    .track.on{background:linear-gradient(90deg,var(--accent-from),var(--accent-to))}
     .track.on .knob{transform:translateX(26px)}
 
     .card .small{font-size:0.82rem;color:var(--muted)}
@@ -210,6 +248,7 @@
       .card{padding:14px}
       .controls{flex-direction:column;align-items:stretch}
       .pill{font-size:0.85rem;padding:8px}
+      .btn.theme{width:40px;height:40px}
     }
 
   </style>
@@ -226,6 +265,13 @@
     </div>
 
     <div class="user-actions">
+      <button id="themeToggleBtn" class="btn theme" aria-pressed="false" title="Toggle theme" aria-label="Toggle theme">
+        <!-- icon replaced by JS based on current theme -->
+        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+        </svg>
+      </button>
+
       <div id="userEmail" class="pill" style="display:none;">
         <!-- filled by JS -->
       </div>
@@ -307,6 +353,8 @@
     const userEmailEl = document.getElementById("userEmail");
     const relayGrid = document.getElementById("relayGrid");
     const onlineCountEl = document.getElementById("onlineCount");
+    const themeToggleBtn = document.getElementById("themeToggleBtn");
+    const themeIcon = document.getElementById("themeIcon");
 
     // Relay definitions
     const relays = [
@@ -315,6 +363,43 @@
       { id: 3, label: "Relay 3", path: "relay3" },
       { id: 4, label: "Relay 4", path: "relay4" }
     ];
+
+    // THEME: apply and persist preference
+    const THEME_KEY = "smart_home_theme"; // 'dark' | 'light' | 'system'
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    function applyTheme(theme) {
+      // theme is 'dark' or 'light'
+      if (theme === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+        themeToggleBtn.setAttribute("aria-pressed", "true");
+        // sun icon
+        themeIcon.innerHTML = '<path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4M12 7a5 5 0 100 10 5 5 0 000-10z"></path>';
+      } else {
+        document.documentElement.setAttribute("data-theme", "dark");
+        themeToggleBtn.setAttribute("aria-pressed", "false");
+        // moon icon
+        themeIcon.innerHTML = '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>';
+      }
+    }
+
+    // Initialize theme on load: use saved, otherwise system preference
+    (function initTheme(){
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === "light" || saved === "dark") {
+        applyTheme(saved);
+      } else {
+        applyTheme(prefersDark ? "dark" : "light");
+      }
+    })();
+
+    // Toggle handler
+    themeToggleBtn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+      const next = current === "light" ? "dark" : "light";
+      applyTheme(next);
+      try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore */ }
+    });
 
     // Create card HTML for each relay (accessible)
     function createRelayCard(relay){
@@ -391,7 +476,6 @@
     // Main control logic
     function startRelayControl(){
       const refs = relays.map(r => ({...r, ref: ref(database, "/" + r.path)}));
-      let onlineCount = 0;
 
       // Listen for each relay state
       refs.forEach(info => {
@@ -416,7 +500,6 @@
           updateUI(state);
           // update online count (simple: count ON relays)
           try {
-            // recalc
             getAllStates().then(states => {
               const countOn = states.filter(s => s).length;
               onlineCountEl.textContent = `${countOn}/${relays.length} ON`;
