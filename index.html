@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>ESP32 Smart Relay Dashboard</title>
+  <title>ESP32 Smart Home Dashboard</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -21,8 +21,8 @@
     <div class="brand">
       <div class="logo" aria-hidden="true">EL</div>
       <div>
-        <h1>ESP32 Relay Dashboard</h1>
-        <div class="subtitle">Fast, mobile-friendly control for your relays</div>
+        <h1>ESP32 Smart Home Dashboard</h1>
+        <div class="subtitle">Manage devices, schedules and scenes for your home</div>
       </div>
     </div>
 
@@ -46,7 +46,7 @@
 
     <!-- Login -->
     <section id="loginForm" class="card form-card" aria-labelledby="loginTitle">
-      <h2 id="loginTitle">Sign in to control relays</h2>
+      <h2 id="loginTitle">Sign in to manage your smart home</h2>
       <label for="email">Email</label>
       <input id="email" type="email" placeholder="you@example.com" autocomplete="username" />
       <label for="password">Password</label>
@@ -54,19 +54,19 @@
       <div class="row">
         <button id="loginBtn" class="btn primary">Sign in</button>
       </div>
-      <div class="hint">Tip: use the same Firebase account configured for your ESP32.</div>
+      <div class="hint">Tip: use the same Firebase account configured for your ESP32 devices.</div>
     </section>
 
     <!-- Dashboard -->
     <section id="dashboard" class="hidden" aria-live="polite">
       <div class="controls">
-        <div class="pill" id="statusSummary">Status: <strong id="onlineCount">...</strong></div>
+        <div class="pill" id="statusSummary">Devices: <strong id="onlineCount">...</strong></div>
         <div style="flex:1"></div>
         <button id="allOffBtn" class="btn danger">All OFF</button>
       </div>
 
-      <div id="relayGrid" class="grid">
-        <!-- cards inserted by JS -->
+      <div id="relayGrid" class="grid" aria-label="Device grid">
+        <!-- device cards inserted by JS -->
       </div>
       <div class="footer-note">Created by israel dev · Responsive & accessible UI</div>
     </section>
@@ -91,9 +91,9 @@
         </section>
 
         <section style="margin-top:12px">
-          <h4>Relays</h4>
+          <h4>Devices</h4>
           <div id="relaysSettings">
-            <!-- filled by JS with inputs for each relay path and label -->
+            <!-- filled by JS with inputs for each device path and label -->
           </div>
           <div class="row" style="margin-top:8px">
             <button id="restoreDefaults" class="btn ghost">Restore Defaults</button>
@@ -115,7 +115,7 @@
     <div class="modal-backdrop" tabindex="-1" data-close></div>
   </div>
 
-  <footer class="page-footer">© EazyLife-electronics</footer>
+  <footer class="page-footer">© EazyLife-electronics · Smart Home</footer>
 
   <!-- Static compat SDKs retained for backward support (not used directly by modules) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js" defer></script>
