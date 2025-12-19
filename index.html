@@ -196,30 +196,48 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
 
-  <script>
+  <script type="module">
+    // Import the functions you need from the Firebase SDKs
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js";
+    import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics.js";
+
     // Firebase config
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-	const firebaseConfig = {
-	  apiKey: "AIzaSyDFfzHIoNCHOKcXR0WoOQZQPHFUM3_pznY",
-	  authDomain: "smart-homes-buliamix.firebaseapp.com",
-	  databaseURL: "https://smart-homes-buliamix-default-rtdb.firebaseio.com",
-	  projectId: "smart-homes-buliamix",
-	  storageBucket: "smart-homes-buliamix.firebasestorage.app",
-	  messagingSenderId: "397418885314",
-	  appId: "1:397418885314:web:8d1d944cd3ab3d61b94b5b",
-	  measurementId: "G-CZNGBWR2X0"
-	};
+    const firebaseConfig = {
+      apiKey: "AIzaSyDFfzHIoNCHOKcXR0WoOQZQPHFUM3_pznY",
+      authDomain: "smart-homes-buliamix.firebaseapp.com",
+      databaseURL: "https://smart-homes-buliamix-default-rtdb.firebaseio.com",
+      projectId: "smart-homes-buliamix",
+      storageBucket: "smart-homes-buliamix.firebasestorage.app",
+      messagingSenderId: "397418885314",
+      appId: "1:397418885314:web:8d1d944cd3ab3d61b94b5b",
+      measurementId: "G-CZNGBWR2X0"
+    };
 
+    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
-  	const analytics = getAnalytics(app);
-
-    // Predefined login credentials (can be replaced with your logic)
-    const allowedEmail = "abc@gmail.com";
-    const allowedPassword = "90009550";
+    const auth = getAuth(app); // Get the Auth instance
+    const database = getDatabase(app); // Get the Database instance
+    const analytics = getAnalytics(app);
 
     const loginForm = document.getElementById("loginForm");
     const dashboard = document.getElementById("dashboard");
     const loginBtn = document.getElementById("loginBtn");
+
+    // Listen for authentication state changes
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // User is signed in
+        loginForm.style.display = "none";
+        dashboard.style.display = "block";
+        startRelayControl();
+      } else {
+        // User is signed out
+        dashboard.style.display = "none";
+        loginForm.style.display = "block";
+      }
+    });
 
     loginBtn.addEventListener("click", () => {
       const email = document.getElementById("email").value.trim();
@@ -230,27 +248,21 @@
         return;
       }
 
-      // Check hardcoded credentials first
-      if(email === allowedEmail && password === allowedPassword){
-        // Sign in with Firebase
-        firebase.auth().signInWithEmailAndPassword(email, password)
-          .then(userCredential => {
-            console.log("Signed in as", userCredential.user.email);
-            loginForm.style.display = "none";
-            dashboard.style.display = "block";
-            startRelayControl();
-          })
-          .catch(error => {
-            alert("Firebase login failed: " + error.message);
-          });
-      } else {
-        alert("Invalid email or password.");
-      }
+      // Sign in with Firebase using email and password
+      signInWithEmailAndPassword(auth, email, password)
+        .then((userCredential) => {
+          // Signed in successfully
+          console.log("Signed in as", userCredential.user.email);
+          // UI state will be handled by onAuthStateChanged listener
+        })
+        .catch((error) => {
+          // Handle login errors
+          alert("Login failed: " + error.message);
+          console.error("Firebase login error:", error);
+        });
     });
 
     function startRelayControl() {
-      const db = firebase.database();
-
       const relays = [
         { id: 1, path: "relay1" },
         { id: 2, path: "relay2" },
@@ -261,42 +273,44 @@
       relays.forEach(relay => {
         const statusText = document.getElementById(`status${relay.id}`);
         const toggleButton = document.getElementById(`btn${relay.id}`);
-        const relayRef = db.ref("/" + relay.path);
+        const relayRef = ref(database, "/" + relay.path); // Use modular ref
 
-        relayRef.on("value", (snapshot) => {
+        onValue(relayRef, (snapshot) => { // Use modular onValue
           const state = snapshot.val();
           statusText.innerText = state ? "ON" : "OFF";
           toggleButton.style.backgroundColor = state ? "green" : "blue";
         });
 
         toggleButton.onclick = () => {
-          relayRef.get().then(snap => {
-            relayRef.set(!snap.val());
+          get(relayRef).then(snap => { // Use modular get
+            set(relayRef, !snap.val()); // Use modular set
           });
         };
       });
 
       document.getElementById("allOffBtn").onclick = () => {
         relays.forEach(relay => {
-          db.ref("/" + relay.path).set(false);
+          set(ref(database, "/" + relay.path), false); // Use modular ref and set
         });
       };
     }
 
     document.getElementById("logoutBtn").onclick = () => {
-      firebase.auth().signOut()
+      signOut(auth) // Use modular signOut
         .then(() => {
-          dashboard.style.display = "none";
-          loginForm.style.display = "block";
+          // Sign-out successful. UI state will be handled by onAuthStateChanged listener
           document.getElementById("email").value = "";
           document.getElementById("password").value = "";
         })
-        .catch(error => {
+        .catch((error) => {
           alert("Logout failed: " + error.message);
+          console.error("Firebase logout error:", error);
         });
     };
   </script>
+
 </body>
 
 </html>
+
 
