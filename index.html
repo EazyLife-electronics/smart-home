@@ -199,16 +199,18 @@
   <script>
     // Firebase config
     const firebaseConfig = {
-	  apiKey: "AIzaSyBFzQJ8a1AuHJABCDvg6UJMxjmD_XPPPOg",
-	  authDomain: "esp32-relay-control-01.firebaseapp.com",
-	  databaseURL: "https://esp32-relay1-control-02-default-rtdb.europe-west1.firebasedatabase.app",
-	  projectId: "esp32-relay-control-01",
-	  storageBucket: "esp32-relay-control-02.firebasestorage.app",
-	  messagingSenderId: "1057958003190",
-	  appId: "1:1057958003190:web:d4200d0e99b5ed880507d7"
-	};
+    apiKey: "AIzaSyDFfzHIoNCHOKcXR0WoOQZQPHFUM3_pznY",
+    authDomain: "smart-homes-buliamix.firebaseapp.com",
+    databaseURL: "https://smart-homes-buliamix-default-rtdb.firebaseio.com",
+    projectId: "smart-homes-buliamix",
+    storageBucket: "smart-homes-buliamix.firebasestorage.app",
+    messagingSenderId: "397418885314",
+    appId: "1:397418885314:web:8d1d944cd3ab3d61b94b5b",
+    measurementId: "G-CZNGBWR2X0"
+  };
 
-    firebase.initializeApp(firebaseConfig);
+    const app = initializeApp(firebaseConfig);
+  	const analytics = getAnalytics(app);
 
     // Predefined login credentials (can be replaced with your logic)
     const allowedEmail = "abc@gmail.com";
@@ -294,4 +296,5 @@
     };
   </script>
 </body>
+
 </html>
