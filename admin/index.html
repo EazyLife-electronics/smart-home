@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin — IoT Smart Home</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles.css">
+
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+    /* Slightly tighter admin container */
+    main { max-width:900px; margin: 18px auto; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">EL</div>
+      <div>
+        <h1>Admin — IoT Smart Home</h1>
+        <div class="subtitle">Admin: change device names, DB prefix and global settings</div>
+      </div>
+    </div>
+
+    <div class="user-actions">
+      <button id="themeToggleBtn" class="btn theme" aria-label="Toggle theme">
+        <svg id="themeIcon" viewBox="0 0 24 24" aria-hidden="true"></svg>
+      </button>
+
+      <div id="userEmail" class="pill" style="display:none;"></div>
+      <button id="logoutBtn" class="btn ghost" style="display:none;">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="errorBanner" class="banner error" role="alert" hidden></div>
+
+    <!-- Admin login -->
+    <section id="loginForm" class="card form-card" aria-labelledby="loginTitle">
+      <h2 id="loginTitle">Admin sign in</h2>
+      <label for="email">Email</label>
+      <input id="email" type="email" placeholder="admin@example.com" autocomplete="username" />
+      <label for="password">Password</label>
+      <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+      <div class="row">
+        <button id="loginBtn" class="btn primary">Sign in</button>
+      </div>
+      <div class="hint">Only authorized administrators should sign in here.</div>
+    </section>
+
+    <!-- Settings UI -->
+    <section id="adminPanel" class="hidden card" aria-live="polite">
+      <h2 style="margin-top:0">Global Settings</h2>
+
+      <div style="margin-top:8px;">
+        <label class="small">Firebase path prefix (optional)</label>
+        <input id="firebasePrefix" placeholder="e.g. devices/esp32" />
+      </div>
+
+      <div style="margin-top:12px;">
+        <h4>Devices</h4>
+        <div id="relaysSettings"></div>
+        <div class="row" style="margin-top:8px">
+          <button id="restoreDefaults" class="btn ghost">Restore Defaults</button>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
+        <button id="saveSettings" class="btn primary">Save settings</button>
+        <button id="revertSettings" class="btn ghost">Revert</button>
+      </div>
+
+      <div style="margin-top:12px; color:var(--muted-00); font-size:0.9rem;">
+        Settings are stored in Realtime Database at <code>/settings</code>. This is a convenience admin UI only — for production enforce server-side security.
+      </div>
+    </section>
+  </main>
+
+  <footer class="page-footer">© EazyLife-electronics · Smart Home (Admin)</footer>
+
+  <!-- shared compat SDK for safety -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js" defer></script>
+
+  <!-- Shared modules -->
+  <script type="module" src="../js/firebase.mjs"></script>
+  <script type="module" src="../js/ui.mjs"></script>
+  <script type="module" src="js/admin-app.mjs"></script>
+</body>
+</html>
