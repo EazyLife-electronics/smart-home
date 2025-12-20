@@ -2,8 +2,8 @@
 // Admin-only client: sign-in, load/save settings to /settings in RTDB
 // Uses shared modules ../js/firebase.mjs and ../js/ui.mjs
 
-import { initFirebase } from '../js/firebase.mjs';
-import { initThemeControls } from '../js/ui.mjs';
+import { initFirebase } from '../../js/firebase.mjs';
+import { initThemeControls } from '../../js/ui.mjs';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js";
 import { ref, get, set, onValue } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
 
