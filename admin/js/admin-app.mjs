@@ -1,6 +1,6 @@
 // admin/js/admin-app.mjs
 // Admin-only client: sign-in, load/save settings to /settings in RTDB
-// Uses shared modules ../js/firebase.mjs and ../js/ui.mjs
+// Uses shared modules ../../js/firebase.mjs and ../../js/ui.mjs
 
 import { initFirebase } from '../../js/firebase.mjs';
 import { initThemeControls } from '../../js/ui.mjs';
@@ -28,11 +28,18 @@ const SETTINGS_DB_PATH = '/settings'; // where admin settings are saved
 
 // default devices (same defaults used by the main app)
 const DEFAULT_RELAYS = [
-  { id: 1, label: 'Bedroom Light', path: 'bedroom_light' },
-  { id: 2, label: 'Bedroom Socket', path: 'bedroom_socket' },
-  { id: 3, label: 'Sitting Room Light', path: 'sittingroom_light' },
-  { id: 4, label: 'Sitting Room Socket', path: 'sittingroom_socket' }
+  { id: 1, label: 'Bedroom Light', path: 'bedroom_light', type: 'switch' },
+  { id: 2, label: 'Bedroom Socket', path: 'bedroom_socket', type: 'switch' },
+  { id: 3, label: 'Sitting Room Light', path: 'sittingroom_light', type: 'switch' },
+  { id: 4, label: 'Sitting Room Socket', path: 'sittingroom_socket', type: 'switch' },
+  { id: 5, label: 'Bedroom Window', path: 'bedroom_window', type: 'slider' },
+  { id: 6, label: 'Sitting Room Window', path: 'sittingroom_window', type: 'slider' }
 ];
+
+const DEFAULT_PRESETS = {
+  bedroom_window: { open: 100, half: 50, close: 0 },
+  sittingroom_window: { open: 100, half: 50, close: 0 }
+};
 
 function showError(msg) {
   errorBanner.hidden = false;
@@ -60,6 +67,8 @@ function escapeHtml(str) {
 
 function populateSettingsUI(settings) {
   relaysSettingsContainer.innerHTML = '';
+
+  // Relays / devices (editable labels & paths)
   const relays = settings.relays || DEFAULT_RELAYS;
   relays.forEach(r => {
     const wrapper = document.createElement('div');
@@ -72,6 +81,32 @@ function populateSettingsUI(settings) {
     `;
     relaysSettingsContainer.appendChild(wrapper);
   });
+
+  // Presets for slider devices
+  const presets = settings.presets || {};
+  const sliderDevices = (relays.filter(d => d.type === 'slider'));
+  if (sliderDevices.length) {
+    const presetsHeader = document.createElement('div');
+    presetsHeader.innerHTML = `<h4 style="margin-top:12px">Window Presets</h4>`;
+    relaysSettingsContainer.appendChild(presetsHeader);
+
+    sliderDevices.forEach(dev => {
+      const p = presets[dev.path] || DEFAULT_PRESETS[dev.path] || { open: 100, half: 50, close: 0 };
+      const wrapper = document.createElement('div');
+      wrapper.style.marginBottom = '10px';
+      wrapper.innerHTML = `
+        <div style="font-weight:600;margin-bottom:6px">${escapeHtml(dev.label)} (path: ${escapeHtml(dev.path)})</div>
+        <label class="small">Open (%)</label>
+        <input data-device="${dev.path}" class="preset-open" type="number" min="0" max="100" value="${Number(p.open)}" />
+        <label class="small">Half (%)</label>
+        <input data-device="${dev.path}" class="preset-half" type="number" min="0" max="100" value="${Number(p.half)}" />
+        <label class="small">Close (%)</label>
+        <input data-device="${dev.path}" class="preset-close" type="number" min="0" max="100" value="${Number(p.close)}" />
+      `;
+      relaysSettingsContainer.appendChild(wrapper);
+    });
+  }
+
   firebasePrefixInput.value = settings.prefix || '';
 }
 
@@ -84,11 +119,28 @@ function readSettingsFromUI() {
     return {
       id,
       label: String(lbl.value).trim() || `Device ${id}`,
-      path: String(pathInput.value).trim() || `device${id}`
+      path: String(pathInput.value).trim() || `device${id}`,
+      type: DEFAULT_RELAYS.find(d => d.id === id)?.type || 'switch'
     };
   });
+
+  // Read presets
+  const presetInputsOpen = [...relaysSettingsContainer.querySelectorAll('.preset-open')];
+  const presets = {};
+  presetInputsOpen.forEach(inp => {
+    const device = inp.dataset.device;
+    const open = Number(inp.value);
+    const half = Number(relaysSettingsContainer.querySelector(`.preset-half[data-device="${device}"]`)?.value || 50);
+    const close = Number(relaysSettingsContainer.querySelector(`.preset-close[data-device="${device}"]`)?.value || 0);
+    presets[device] = {
+      open: Number.isFinite(open) ? Math.min(100, Math.max(0, open)) : 100,
+      half: Number.isFinite(half) ? Math.min(100, Math.max(0, half)) : 50,
+      close: Number.isFinite(close) ? Math.min(100, Math.max(0, close)) : 0
+    };
+  });
+
   const prefix = String(firebasePrefixInput.value).trim().replace(/^\/+|\/+$/g, '');
-  return { relays, prefix };
+  return { relays, prefix, presets };
 }
 
 // load settings from DB; if missing, use defaults
@@ -97,16 +149,23 @@ async function loadSettingsFromDB() {
     const snap = await get(ref(database, SETTINGS_DB_PATH));
     const val = snap.exists() ? snap.val() : null;
     if (val && typeof val === 'object') {
+      // normalize relays array if stored as object
+      let relays = [];
+      if (Array.isArray(val.relays)) relays = val.relays;
+      else if (val.relays && typeof val.relays === 'object') relays = Object.values(val.relays);
+      else relays = DEFAULT_RELAYS;
+
       return {
-        relays: Array.isArray(val.relays) ? val.relays : (val.relays ? Object.values(val.relays) : DEFAULT_RELAYS),
-        prefix: val.prefix || ''
+        relays,
+        prefix: val.prefix || '',
+        presets: val.presets || DEFAULT_PRESETS
       };
     }
-    return { relays: DEFAULT_RELAYS, prefix: '' };
+    return { relays: DEFAULT_RELAYS, prefix: '', presets: DEFAULT_PRESETS };
   } catch (err) {
     console.error('Failed to load settings:', err);
     showError('Failed to load settings: ' + (err.message || err));
-    return { relays: DEFAULT_RELAYS, prefix: '' };
+    return { relays: DEFAULT_RELAYS, prefix: '', presets: DEFAULT_PRESETS };
   }
 }
 
@@ -144,7 +203,8 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 restoreDefaultsBtn.addEventListener('click', () => {
-  populateSettingsUI({ relays: DEFAULT_RELAYS, prefix: '' });
+  const defaults = { relays: DEFAULT_RELAYS, prefix: '', presets: DEFAULT_PRESETS };
+  populateSettingsUI(defaults);
 });
 
 revertBtn.addEventListener('click', async () => {
