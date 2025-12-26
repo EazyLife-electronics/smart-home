@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ESP32 Simulator — IoT Smart Home</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:Inter,system-ui,Arial;margin:16px;background:#f6f8fb;color:#0b1220}
+    h1{font-size:1.1rem;margin:0 0 8px}
+    .row{display:flex;gap:8px;align-items:center;margin:8px 0}
+    .card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(12,24,48,0.06);margin-bottom:12px}
+    label{font-size:0.9rem;color:#475569}
+    input[type="text"],input[type="password"],input[type="number"]{padding:8px;border-radius:8px;border:1px solid #e2e8f0}
+    button{padding:8px 12px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid #cbd5e1;color:#0b1220}
+    pre{background:#0b1220;color:#e6eef8;padding:8px;border-radius:8px;height:160px;overflow:auto}
+    table{width:100%;border-collapse:collapse}
+    td,th{padding:6px 8px;border-bottom:1px solid #eef2ff;text-align:left}
+    .muted{color:#64748b;font-size:0.9rem}
+    .small{font-size:0.85rem;color:#475569}
+    .pill{display:inline-block;background:#eef2ff;color:#0b1220;padding:6px 10px;border-radius:999px;font-weight:600}
+  </style>
+</head>
+<body>
+
+  <h1>ESP32 Simulator — IoT Smart Home</h1>
+  <div class="muted">This page simulates an ESP32 device: it listens for control commands and writes feedback + heartbeat so you can test the UI without real hardware.</div>
+
+  <div class="card">
+    <div style="display:flex;gap:12px;align-items:center;justify-content:space-between">
+      <div>
+        <div class="small">Firebase project used by simulator</div>
+        <div class="pill" id="projectId">loading…</div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <div>
+          <input id="simEmail" type="text" placeholder="email (optional)" style="width:220px" />
+          <input id="simPassword" type="password" placeholder="password (optional)" style="width:220px" />
+        </div>
+        <button id="signInBtn">Sign in (optional)</button>
+        <button id="signOutBtn" class="ghost" style="display:none">Sign out</button>
+      </div>
+    </div>
+
+    <div style="margin-top:8px" class="small">
+      You can sign in if your DB rules require authenticated writes. Otherwise leave blank — simulator will attempt unauthenticated writes.
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;gap:12px;align-items:center">
+      <div>
+        <div class="small">Simulator controls</div>
+        <div class="muted">Heartbeat interval (ms)</div>
+      </div>
+      <input id="heartbeatMs" type="number" value="2000" style="width:120px" />
+      <label class="small"><input id="autoRespond" type="checkbox" checked /> Auto-respond to control commands</label>
+      <label class="small"><input id="simulateDelay" type="checkbox" /> Add response delay</label>
+      <input id="responseDelayMs" type="number" value="500" style="width:100px" />
+      <button id="startBtn">Start Simulator</button>
+      <button id="stopBtn" class="ghost" style="display:none">Stop</button>
+    </div>
+
+    <div style="margin-top:10px" class="small muted">
+      When running the simulator will write /heartbeat and update feedback nodes when it detects a command written to control paths.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px 0">Device view / manual controls</h3>
+
+    <table id="devicesTable">
+      <thead><tr><th>Device</th><th>Control Path</th><th>Feedback Path</th><th>Control (write)</th><th>Feedback (current)</th><th>Action</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+      <button id="sendSampleCommands" class="ghost">Send sample commands</button>
+      <button id="clearLogs" class="ghost">Clear logs</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px 0">Simulator logs</h3>
+    <pre id="logArea">Ready.</pre>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    // Modular SDK imports
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js";
+    import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
+
+    // Use same config as your project (kept from the repo)
+    const firebaseConfig = {
+      apiKey: "AIzaSyDFfzHIoNCHOKcXR0WoOQZQPHFUM3_pznY",
+      authDomain: "smart-homes-buliamix.firebaseapp.com",
+      databaseURL: "https://smart-homes-buliamix-default-rtdb.firebaseio.com",
+      projectId: "smart-homes-buliamix",
+      storageBucket: "smart-homes-buliamix.firebasestorage.app",
+      messagingSenderId: "397418885314",
+      appId: "1:397418885314:web:8d1d944cd3ab3d61b94b5b",
+      measurementId: "G-CZNGBWR2X0"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const database = getDatabase(app);
+
+    // Simulator device definitions — these match your Arduino control & feedback paths
+    const DEVICES = [
+      { id: 'sittingRoomLight', label: 'Sitting Room Light', controlPath: '/sittingRoomLight', feedbackPath: '/feedback/sittingRoomLightFeedback', type: 'switch' },
+      { id: 'bedRoomLight', label: 'Bedroom Light', controlPath: '/bedRoomLight', feedbackPath: '/feedback/bedRoomLightFeedback', type: 'switch' },
+      { id: 'sittingRoomSocket', label: 'Sitting Room Socket', controlPath: '/sittingRoomSocket', feedbackPath: '/feedback/sittingRoomSocketFeedback', type: 'switch' },
+      { id: 'bedRoomSocket', label: 'Bedroom Socket', controlPath: '/bedRoomSocket', feedbackPath: '/feedback/bedRoomSocketFeedback', type: 'switch' },
+      { id: 'bedRoomWindow', label: 'Bedroom Window', controlPath: '/bedRoomWindow', feedbackPath: '/feedback/bedRoomWindow', type: 'slider' },
+      { id: 'sittingRoomWindow', label: 'Sitting Room Window', controlPath: '/sittingRoomWindow', feedbackPath: '/feedback/sittingRoomWindow', type: 'slider' }
+    ];
+
+    // UI elements
+    const projectIdEl = document.getElementById('projectId');
+    const signInBtn = document.getElementById('signInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const simEmail = document.getElementById('simEmail');
+    const simPassword = document.getElementById('simPassword');
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const heartbeatMsInput = document.getElementById('heartbeatMs');
+    const autoRespondCheckbox = document.getElementById('autoRespond');
+    const simulateDelayCheckbox = document.getElementById('simulateDelay');
+    const responseDelayMsInput = document.getElementById('responseDelayMs');
+
+    const devicesTbody = document.querySelector('#devicesTable tbody');
+    const logArea = document.getElementById('logArea');
+    const sendSampleBtn = document.getElementById('sendSampleCommands');
+    const clearLogsBtn = document.getElementById('clearLogs');
+
+    projectIdEl.textContent = firebaseConfig.projectId || 'unknown';
+
+    // simulator state
+    let running = false;
+    let heartbeatTimer = null;
+    let listeners = [];
+    let responseDelay = 500;
+
+    // simple logger
+    function log(...args) {
+      console.log(...args);
+      const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+      logArea.textContent = msg + "\n" + logArea.textContent;
+    }
+
+    // build devices table rows
+    function buildDeviceRows() {
+      devicesTbody.innerHTML = '';
+      for (const dev of DEVICES) {
+        const tr = document.createElement('tr');
+        const controlInputId = `ctrl-${dev.id}`;
+        const feedbackCellId = `fb-${dev.id}`;
+        tr.innerHTML = `
+          <td>${dev.label}</td>
+          <td class="small">${dev.controlPath}</td>
+          <td class="small">${dev.feedbackPath}</td>
+          <td>
+            ${dev.type === 'slider'
+              ? `<input id="${controlInputId}" type="range" min="0" max="100" value="0" style="width:160px" />`
+              : `<select id="${controlInputId}"><option value="0">OFF</option><option value="1">ON</option></select>`
+            }
+          </td>
+          <td id="${feedbackCellId}" class="small">-</td>
+          <td><button data-dev="${dev.id}" class="applyBtn">Apply (write control)</button></td>
+        `;
+        devicesTbody.appendChild(tr);
+
+        // wire apply button
+        tr.querySelector('.applyBtn').addEventListener('click', async (ev) => {
+          if (!running) { log('Simulator not running: start first'); return; }
+          const input = document.getElementById(controlInputId);
+          let value = (dev.type === 'slider') ? Number(input.value) : Number(input.value);
+          try {
+            await set(ref(database, dev.controlPath), value);
+            log('Wrote control', dev.controlPath, value);
+          } catch (err) {
+            log('Write error', err.message || err);
+          }
+        });
+      }
+    }
+
+    buildDeviceRows();
+
+    // sign-in/out handlers
+    signInBtn.addEventListener('click', async () => {
+      const email = simEmail.value.trim();
+      const pass = simPassword.value;
+      if (!email || !pass) { alert('Enter email & password to sign in'); return; }
+      try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        log('Signed in as', email);
+        signInBtn.style.display = 'none';
+        signOutBtn.style.display = 'inline-block';
+      } catch (err) {
+        log('Sign-in failed', err.code || err.message);
+        alert('Sign-in failed: ' + (err.message || err.code));
+      }
+    });
+
+    signOutBtn.addEventListener('click', async () => {
+      try {
+        await signOut(auth);
+        log('Signed out');
+        signInBtn.style.display = 'inline-block';
+        signOutBtn.style.display = 'none';
+      } catch (err) {
+        log('Sign-out failed', err);
+      }
+    });
+
+    // simulate response behavior:
+    // when a control path changes, if autoRespond enabled, update feedback path after optional delay.
+    function startListeners() {
+      // unsubscribe existing
+      for (const u of listeners) try { u(); } catch(e){}
+      listeners = [];
+
+      for (const dev of DEVICES) {
+        const controlRef = ref(database, dev.controlPath);
+        const unsub = onValue(controlRef, async (snap) => {
+          // ignore if no value
+          if (!snap || !snap.exists()) return;
+          const val = snap.val();
+          log('Control change detected', dev.controlPath, val);
+
+          if (!autoRespondCheckbox.checked) return;
+
+          // compute delay
+          const delayMs = simulateDelayCheckbox.checked ? Number(responseDelayMsInput.value || responseDelay) : 0;
+
+          if (dev.type === 'switch') {
+            // treat any truthy value as ON (1)
+            const v = val ? 1 : 0;
+            setTimeout(async () => {
+              try {
+                await set(ref(database, dev.feedbackPath), v);
+                log('Wrote feedback', dev.feedbackPath, v);
+                // also update feedback-specific name (some UI expects different)
+              } catch (err) {
+                log('Feedback write error', err);
+              }
+            }, delayMs);
+          } else if (dev.type === 'slider') {
+            // emulate servo moving: ramp from current feedback to target in steps
+            try {
+              const fbSnap = await get(ref(database, dev.feedbackPath));
+              const current = (fbSnap && fbSnap.exists()) ? Number(fbSnap.val()) : 0;
+              const target = Number(val);
+              const steps = Math.max(1, Math.round(Math.abs(target - current) / 5)); // 5% per step
+              const stepMs = Math.max(50, Math.round((delayMs || 500) / Math.max(steps,1)));
+              let i = 0;
+              const dir = target > current ? 1 : -1;
+              const task = setInterval(async () => {
+                i++;
+                const next = Math.round(current + dir * Math.min(Math.abs(target - current), i * Math.abs(target - current) / steps));
+                try {
+                  await set(ref(database, dev.feedbackPath), next);
+                  log('Ramp feedback', dev.feedbackPath, next);
+                } catch (err) {
+                  log('Ramp write error', err);
+                }
+                if ((dir === 1 && next >= target) || (dir === -1 && next <= target) || i >= steps) {
+                  clearInterval(task);
+                }
+              }, stepMs);
+            } catch (err) {
+              log('Slider handling error', err);
+              // fallback: write target after delay
+              setTimeout(async () => {
+                try {
+                  await set(ref(database, dev.feedbackPath), Number(val));
+                } catch (e) { log('Feedback write error', e); }
+              }, delayMs);
+            }
+          }
+        }, (err) => {
+          log('control onValue error', err);
+        });
+        listeners.push(unsub);
+      }
+    }
+
+    // heartbeat writer
+    function startHeartbeat() {
+      stopHeartbeat();
+      const hbMs = Number(heartbeatMsInput.value) || 2000;
+      heartbeatTimer = setInterval(async () => {
+        try {
+          // Use Date.now() here; the UI treats arrival time to determine online status.
+          await set(ref(database, '/heartbeat'), Date.now());
+          // also optionally log the heartbeat write
+          // log('heartbeat', Date.now());
+        } catch (err) {
+          log('Heartbeat write error', err);
+        }
+      }, hbMs);
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    }
+
+    // read feedback values periodically to update the table (also driven by onValue but keep for initial snapshot)
+    async function refreshFeedbackCells() {
+      for (const dev of DEVICES) {
+        try {
+          const fbSnap = await get(ref(database, dev.feedbackPath));
+          const val = fbSnap && fbSnap.exists() ? fbSnap.val() : '-';
+          const cell = document.getElementById(`fb-${dev.id}`);
+          if (cell) cell.textContent = String(val);
+        } catch (err) {
+          log('Feedback read error', err);
+        }
+      }
+    }
+
+    // start/stop simulator
+    startBtn.addEventListener('click', () => {
+      if (running) return;
+      running = true;
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'inline-block';
+      // start heartbeat and listeners
+      startHeartbeat();
+      startListeners();
+      // initial feedback snapshot
+      refreshFeedbackCells();
+      log('Simulator started');
+    });
+
+    stopBtn.addEventListener('click', () => {
+      if (!running) return;
+      running = false;
+      startBtn.style.display = 'inline-block';
+      stopBtn.style.display = 'none';
+      stopHeartbeat();
+      for (const u of listeners) try { u(); } catch(e){}
+      listeners = [];
+      log('Simulator stopped');
+    });
+
+    // sample command sequence for quick testing
+    sendSampleBtn.addEventListener('click', async () => {
+      if (!running) { log('Start simulator first'); return; }
+      log('Sending sample commands...');
+      // toggle lights, open windows half-way etc
+      try {
+        await set(ref(database, '/sittingRoomLight'), 1);
+        await set(ref(database, '/bedRoomLight'), 0);
+        await set(ref(database, '/sittingRoomWindow'), 75);
+        await set(ref(database, '/bedRoomWindow'), 25);
+        log('Sample commands sent');
+      } catch (err) {
+        log('Sample command write error', err);
+      }
+    });
+
+    clearLogsBtn.addEventListener('click', () => logArea.textContent = '');
+
+    // keep feedback cells updated by listening to feedback paths (for UI display)
+    function watchFeedbackCells() {
+      for (const dev of DEVICES) {
+        const fbRef = ref(database, dev.feedbackPath);
+        onValue(fbRef, (snap) => {
+          const val = snap && snap.exists() ? snap.val() : '-';
+          const cell = document.getElementById(`fb-${dev.id}`);
+          if (cell) cell.textContent = String(val);
+        }, (err) => {
+          log('feedback cell onValue error', err);
+        });
+      }
+    }
+
+    watchFeedbackCells();
+
+    // auto-update responseDelay var when input changes
+    responseDelayMsInput.addEventListener('change', () => {
+      responseDelay = Number(responseDelayMsInput.value || responseDelay);
+    });
+
+    // initial log
+    log('Simulator ready. Click Start Simulator to begin.');
+  </script>
+</body>
+</html>
