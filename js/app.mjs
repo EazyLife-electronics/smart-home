@@ -9,6 +9,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https:/
 import { ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
 
 const { auth, database } = initFirebase();
+console.log('Auth object:', auth);
 initThemeControls();
 
 // UI refs
@@ -473,20 +474,28 @@ logoutBtn.addEventListener('click', async () => {
 
 onAuthStateChanged(auth, (user) => {
   if (user) {
+    // Show dashboard
     loginForm.classList.add('hidden');
     dashboard.classList.remove('hidden');
     logoutBtn.style.display = 'inline-flex';
     userEmailEl.style.display = 'inline-flex';
     userEmailEl.textContent = user.email || '';
 
-    startFeedbackFirstControl();
+    // Try initializing feedback-driven UI safely
+    try {
+      startFeedbackFirstControl();
+    } catch (err) {
+      console.error('Dashboard initialization failed', err);
+      showError('Dashboard failed to load: ' + (err.message || err));
+    }
   } else {
+    // Hide dashboard and show login
     dashboard.classList.add('hidden');
     loginForm.classList.remove('hidden');
     logoutBtn.style.display = 'none';
     userEmailEl.style.display = 'none';
 
-    // cleanup listeners
+    // Clean up any existing listeners
     listeners.forEach(unsub => { try { unsub(); } catch(e) {} });
     listeners.length = 0;
     relayGrid.innerHTML = '';
