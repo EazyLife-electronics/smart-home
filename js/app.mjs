@@ -352,48 +352,32 @@ function startFeedbackFirstControl() {
     }
   };
 
-  // heartbeat subscription
+  // Heartbeat subscription
   const hbRef = ref(database, '/heartbeat');
-  heartbeatUnsub = onValue(hbRef, (snap) => {
-    const ts = snap && snap.exists() ? Number(snap.val()) : 0;
-    if (ts) lastHeartbeat = ts;
-    // immediate online status update
-    checkHeartbeatAlive();
+  const unsubHb = onValue(hbRef, (snap) => {
+    if (snap.exists()) {
+      lastHeartbeat = Number(snap.val());
+      lastHeartbeatReceivedAt = Date.now();
+      if (offline) {
+        offline = false;
+        DEVICES.forEach(d => {
+          const card = document.getElementById(`card-${d.id}`);
+          if (card) applyOfflineVisual(card, false);
+        });
+        clearError();
+      }
+    }
   }, (err) => {
-    console.error('Heartbeat onValue error', err);
+    console.warn('Heartbeat subscription error', err);
   });
-
+  listeners.push(unsubHb);
+  
   // check periodically for stale heartbeat
   setInterval(checkHeartbeatAlive, 1500);
 }
 
-function checkHeartbeatAlive() {
-  const now = Date.now();
-  // If lastHeartbeat is in seconds timestamp from Arduino (ms?), Arduino writes millis() value (ms)
-  // We accept either: if it's much smaller than now assume ms; else fallback
-  // The Arduino code sets lastHeartbeat = millis(); so it's ms since device boot, not epoch.
-  // But the web client receives that numeric increasing value; easiest: treat heartbeat as update time by capturing arrival time.
-  // We'll instead use the last time we received the heartbeat update (in wall clock).
-  // For that, we maintain a timestamp of last update when onValue fired.
-  // To implement that, we will store 'lastHeartbeatReceivedAt' when onValue fires. We'll update that in the onValue callback.
-  // But to avoid refactor here, simply if lastHeartbeat>0 then mark online true and reset offline timer.
-  // We'll use the arrival wall-clock time instead:
-  if (!lastHeartbeat) {
-    // no heartbeat yet -> assume offline for safety? We'll not change offline unless we have seen heartbeat.
-    return;
-  }
-  // For robustness, we'll track the arrival time in a global variable maintained by the heartbeat onValue callback.
-  // To keep this code simple, assume the Arduino's heartbeat is monotonic and was recently updated.
-  // Check if the last heartbeat was updated within the threshold by using Date.now() - lastHeartbeatReceivedAt
-}
 
-// To properly track heartbeat arrival wall-clock time, override the heartbeat onValue handler above to set 'lastHeartbeatReceivedAt'.
-// We'll implement it now: (note: the heartbeat onValue above must set lastHeartbeatReceivedAt)
 let lastHeartbeatReceivedAt = 0;
-// Patch: replace heartbeat onValue with wrapper that sets lastHeartbeatReceivedAt (we already created heartbeat subscription above)
-// Because of the single-file nature we just monkey-patch here: ensure lastHeartbeatReceivedAt updated when hbRef fires.
-// In the onValue call above we did update 'lastHeartbeat'; update the variable there too by reading Date.now().
-// To avoid duplication, we'll now set lastHeartbeatReceivedAt when onValue fires by subscribing again:
 (function ensureHeartbeatReceiver() {
   const hbRef = ref(database, '/heartbeat');
   onValue(hbRef, (snap) => {
