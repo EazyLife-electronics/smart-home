@@ -111,12 +111,12 @@
 
     // Simulator device definitions — these match your Arduino control & feedback paths
     const DEVICES = [
-      { id: 'sittingRoomLight', label: 'Sitting Room Light', controlPath: '/sittingRoomLight', feedbackPath: '/feedback/sittingRoomLightFeedback', type: 'switch' },
-      { id: 'bedRoomLight', label: 'Bedroom Light', controlPath: '/bedRoomLight', feedbackPath: '/feedback/bedRoomLightFeedback', type: 'switch' },
-      { id: 'sittingRoomSocket', label: 'Sitting Room Socket', controlPath: '/sittingRoomSocket', feedbackPath: '/feedback/sittingRoomSocketFeedback', type: 'switch' },
-      { id: 'bedRoomSocket', label: 'Bedroom Socket', controlPath: '/bedRoomSocket', feedbackPath: '/feedback/bedRoomSocketFeedback', type: 'switch' },
-      { id: 'bedRoomWindow', label: 'Bedroom Window', controlPath: '/bedRoomWindow', feedbackPath: '/feedback/bedRoomWindow', type: 'slider' },
-      { id: 'sittingRoomWindow', label: 'Sitting Room Window', controlPath: '/sittingRoomWindow', feedbackPath: '/feedback/sittingRoomWindow', type: 'slider' }
+      { id: 'sittingRoomLight', label: 'Sitting Room Light', controlPath: '/control/sittingRoomLight', feedbackPath: '/feedback/sittingRoomLightFeedback', type: 'switch' },
+      { id: 'bedRoomLight', label: 'Bedroom Light', controlPath: '/control/bedRoomLight', feedbackPath: '/feedback/bedRoomLightFeedback', type: 'switch' },
+      { id: 'sittingRoomSocket', label: 'Sitting Room Socket', controlPath: '/control/sittingRoomSocket', feedbackPath: '/feedback/sittingRoomSocketFeedback', type: 'switch' },
+      { id: 'bedRoomSocket', label: 'Bedroom Socket', controlPath: '/control/bedRoomSocket', feedbackPath: '/feedback/bedRoomSocketFeedback', type: 'switch' },
+      { id: 'bedRoomWindow', label: 'Bedroom Window', controlPath: '/control/bedRoomWindow', feedbackPath: '/feedback/bedRoomWindow', type: 'slider' },
+      { id: 'sittingRoomWindow', label: 'Sitting Room Window', controlPath: '/control/sittingRoomWindow', feedbackPath: '/feedback/sittingRoomWindow', type: 'slider' }
     ];
 
     // UI elements
