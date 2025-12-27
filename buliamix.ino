@@ -21,18 +21,18 @@ bool systemReady = false;
 unsigned long lastHeartbeat = 0;
 
 /************ RELAYS ************/
-#define sittingRoomLightRelayPin 23
-#define bedRoomLightRelayPin 22
-#define sittingRoomSocketRelayPin 21
-#define bedRoomSocketRelayPin 19
+#define sittingRoomLightRelayPin 21
+#define bedRoomLightRelayPin 33
+#define sittingRoomSocketRelayPin 19
+#define bedRoomSocketRelayPin 25
 
 /************ LOAD FEEDBACK (INPUT ONLY PINS) ************/
-#define sittingRoomLightFeedbackPin 34
-#define bedRoomLightFeedbackPin 35
+#define sittingRoomLightFeedbackPin 22
+#define bedRoomLightFeedbackPin 32
 
 /************ SERVOS ************/
 #define sittingRoomWindowServoPin 18
-#define bedRoomWindowServoPin 5
+#define bedRoomWindowServoPin 26
 
 Servo sittingRoomWindowServo;
 Servo bedRoomWindowServo;
@@ -60,6 +60,7 @@ void setup() {
   // ---------- FIREBASE ----------
   config.api_key = API_KEY;
   config.database_url = DATABASE_URL;
+  config.signer.test_mode = true;  // <-- REQUIRED
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
@@ -85,7 +86,12 @@ void loop() {
     // heartbeat every 2 seconds
     if (millis() - lastHeartbeat > 2000) {
       lastHeartbeat = millis();
-      Firebase.RTDB.setInt(&fbdo, "/heartbeat", lastHeartbeat);
+      if (!Firebase.RTDB.setInt(&fbdo, "/heartbeat", 1)) {
+        Serial.println("Heartbeat write failed");
+        Serial.println(fbdo.errorReason());
+      } else {
+        Serial.println("Heartbeat sent");
+      }
     }
   }
   // Monitor physical switch changes
