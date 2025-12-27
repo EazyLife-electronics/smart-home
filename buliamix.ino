@@ -9,6 +9,8 @@
 /************ FIREBASE ************/
 #define API_KEY "AIzaSyDFfzHIoNCHOKcXR0WoOQZQPHFUM3_pznY"
 #define DATABASE_URL "https://smart-homes-buliamix-default-rtdb.firebaseio.com"
+#define USER_EMAIL "damzyeazy@gmail.com"
+#define USER_PASSWORD "iotdeveloper"
 
 /************ FIREBASE OBJECTS ************/
 FirebaseData fbdo;
@@ -54,15 +56,25 @@ void setup() {
   // ---------- WIFI ----------
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(300);
+    delay(500);
+    Serial.print(".");
   }
+  Serial.println("\nWiFi connected");
 
   // ---------- FIREBASE ----------
   config.api_key = API_KEY;
   config.database_url = DATABASE_URL;
-  config.signer.test_mode = true;  // <-- REQUIRED
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
+
+  Serial.print("Signing in");
+  while (auth.token.uid == "") {
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println("\nFirebase authenticated");
 
   // ---------- SERVOS ----------
   sittingRoomWindowServo.attach(sittingRoomWindowServoPin);
@@ -86,7 +98,7 @@ void loop() {
     // heartbeat every 2 seconds
     if (millis() - lastHeartbeat > 2000) {
       lastHeartbeat = millis();
-      if (!Firebase.RTDB.setInt(&fbdo, "/heartbeat", 1)) {
+      if (!Firebase.RTDB.setInt(&fbdo, "/heartbeat", lastHeartbeat)) {
         Serial.println("Heartbeat write failed");
         Serial.println(fbdo.errorReason());
       } else {
