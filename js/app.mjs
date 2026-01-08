@@ -34,12 +34,12 @@ const DEVICES = [
   // relays (switch type)
   { id: 1, label: 'Sitting Room Light', controlPath: '/control/sittingRoomLight', feedbackPath: '/feedback/sittingRoomLightFeedback', type: 'switch' },
   { id: 2, label: 'Bedroom Light', controlPath: '/control/bedRoomLight', feedbackPath: '/feedback/bedRoomLightFeedback', type: 'switch' },
-  { id: 3, label: 'Sitting Room Socket', controlPath: '/control/sittingRoomSocket', feedbackPath: '/feedback/sittingRoomSocketFeedback', type: 'switch' },
-  { id: 4, label: 'Bedroom Socket', controlPath: '/control/bedRoomSocket', feedbackPath: '/feedback/bedRoomSocketFeedback', type: 'switch' },
+  { id: 3, label: 'Sitting Room Socket', controlPath: '/control/sittingRoomSocket', feedbackPath: '/control/sittingRoomSocketFeedback', type: 'switch' },
+  { id: 4, label: 'Bedroom Socket', controlPath: '/control/bedRoomSocket', feedbackPath: '/control/bedRoomSocketFeedback', type: 'switch' },
 
   // sliders (servo percentage)
-  { id: 5, label: 'Bedroom Window', controlPath: '/control/bedRoomWindow', feedbackPath: '/feedback/bedRoomWindow', type: 'slider' },
-  { id: 6, label: 'Sitting Room Window', controlPath: '/control/sittingRoomWindow', feedbackPath: '/feedback/sittingRoomWindow', type: 'slider' }
+  { id: 5, label: 'Bedroom Window', controlPath: '/control/bedRoomWindow', feedbackPath: '/control/bedRoomWindow', type: 'slider' },
+  { id: 6, label: 'Sitting Room Window', controlPath: '/control/sittingRoomWindow', feedbackPath: '/control/sittingRoomWindow', type: 'slider' }
 ];
 
 // Local default presets if none in DB (admin can set /settings/presets/<deviceKey>)
