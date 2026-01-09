@@ -32,14 +32,14 @@ const SLIDER_DEBOUNCE_MS = 300;
 // Devices: note controlPath (where UI writes commands) and feedbackPath (truth source, used for all UI)
 const DEVICES = [
   // relays (switch type)
-  { id: 1, label: 'Sitting Room Light', controlPath: '/control/sittingRoomLight', feedbackPath: '/feedback/sittingRoomLightFeedback', type: 'switch' },
-  { id: 2, label: 'Bedroom Light', controlPath: '/control/bedRoomLight', feedbackPath: '/feedback/bedRoomLightFeedback', type: 'switch' },
-  { id: 3, label: 'Sitting Room Socket', controlPath: '/control/sittingRoomSocket', feedbackPath: '/control/sittingRoomSocketFeedback', type: 'switch' },
-  { id: 4, label: 'Bedroom Socket', controlPath: '/control/bedRoomSocket', feedbackPath: '/control/bedRoomSocketFeedback', type: 'switch' },
+  { id: 1, label: 'Sitting Room Light', controlPath: '/control/sittingRoomLight', feedbackPath: '/feedback/sittingRoomLightFeedback', type: 'switch', feedbackMode: 'verified' },
+  { id: 2, label: 'Bedroom Light', controlPath: '/control/bedRoomLight', feedbackPath: '/feedback/bedRoomLightFeedback', type: 'switch', feedbackMode: 'verified' },
+  { id: 3, label: 'Sitting Room Socket', controlPath: '/control/sittingRoomSocket', feedbackPath: null, type: 'switch', feedbackMode: 'assumed' },
+  { id: 4, label: 'Bedroom Socket', controlPath: '/control/bedRoomSocket', feedbackPath: null, type: 'switch', feedbackMode: 'assumed' },
 
   // sliders (servo percentage)
-  { id: 5, label: 'Bedroom Window', controlPath: '/control/bedRoomWindow', feedbackPath: '/control/bedRoomWindow', type: 'slider' },
-  { id: 6, label: 'Sitting Room Window', controlPath: '/control/sittingRoomWindow', feedbackPath: '/control/sittingRoomWindow', type: 'slider' }
+  { id: 5, label: 'Bedroom Window', controlPath: '/control/bedRoomWindow', feedbackPath: null, type: 'slider', feedbackMode: 'assumed' },
+  { id: 6, label: 'Sitting Room Window', controlPath: '/control/sittingRoomWindow', feedbackPath: null, type: 'slider', feedbackMode: 'assumed' }
 ];
 
 // Local default presets if none in DB (admin can set /settings/presets/<deviceKey>)
@@ -139,6 +139,24 @@ function applyOfflineVisual(card, isOffline) {
   }
 }
 
+function updateSwitchUI(deviceId, value) {
+  const track = document.getElementById(`track${deviceId}`);
+  const statusText = document.getElementById(`statusText${deviceId}`);
+  const indicator = document.getElementById(`indicator${deviceId}`);
+
+  if (!track || !statusText || !indicator) return;
+
+  const on = !!value;
+  track.classList.toggle('on', on);
+  track.setAttribute('aria-checked', on ? 'true' : 'false');
+
+  statusText.textContent = on ? 'ON' : 'OFF';
+  statusText.classList.toggle('muted', !on);
+
+  indicator.classList.toggle('on', on);
+  indicator.classList.toggle('off', !on);
+}
+
 // Smoothly animate slider value from current to target (ms duration)
 function animateSliderTo(sliderEl, valueEl, from, to, duration = 300) {
   if (!sliderEl || !valueEl) return;
@@ -163,64 +181,70 @@ function startFeedbackFirstControl() {
   // subscribe to feedback paths
   DEVICES.forEach(dev => {
     // feedback listener
-    const fbRef = ref(database, dev.feedbackPath);
-    const unsubFeedback = onValue(fbRef, (snap) => {
-      // heartbeat may indicate offline => handled separately
-      const val = snap.val();
-
-      // Update UI from feedback (truth)
-      if (dev.type === 'slider') {
-        const slider = document.getElementById(`slider${dev.id}`);
-        const valueEl = document.getElementById(`sliderValue${dev.id}`);
-        const pendingEl = document.getElementById(`pending${dev.id}`);
-        const current = Number(slider.value || 0);
-        const target = Number(val ?? 0);
-
-        // hide pending if feedback equals expected value
-        const pendingInfo = pendingMap.get(dev.controlPath);
-        if (pendingInfo && pendingInfo.expectedValue !== undefined && pendingInfo.expectedValue === target) {
-          // command confirmed
-          pendingMap.delete(dev.controlPath);
-          if (pendingEl) pendingEl.style.display = 'none';
+    if (dev.feedbackPath) {
+      const fbRef = ref(database, dev.feedbackPath);
+      const unsubFeedback = onValue(fbRef, (snap) => {
+        // heartbeat may indicate offline => handled separately
+        const val = snap.val();
+  
+        // Update UI from feedback (truth)
+        if (dev.type === 'slider') {
+          const slider = document.getElementById(`slider${dev.id}`);
+          const valueEl = document.getElementById(`sliderValue${dev.id}`);
+          const pendingEl = document.getElementById(`pending${dev.id}`);
+          const current = Number(slider.value || 0);
+          const target = Number(val ?? 0);
+  
+          // hide pending if feedback equals expected value
+          const pendingInfo = pendingMap.get(dev.controlPath);
+          if (pendingInfo && pendingInfo.expectedValue !== undefined && pendingInfo.expectedValue === target) {
+            // command confirmed
+            pendingMap.delete(dev.controlPath);
+            if (pendingEl) pendingEl.style.display = 'none';
+          }
+  
+          // animate to new feedback value
+          if (dev.feedbackMode === 'assumed') {
+            animateSliderTo(slider, valueEl, current, target, 300);
+            return;
+          }
+          //animateSliderTo(slider, valueEl, current, target, 300);
+  
+        } else { // switch
+          const statusText = document.getElementById(`statusText${dev.id}`);
+          const indicator = document.getElementById(`indicator${dev.id}`);
+          const track = document.getElementById(`track${dev.id}`);
+          const pendingEl = document.getElementById(`pending${dev.id}`);
+  
+          const fbState = !!val;
+  
+          // hide pending if matches expectation
+          const pendingInfo = pendingMap.get(dev.controlPath);
+          if (pendingInfo && pendingInfo.expectedValue !== undefined && (!!pendingInfo.expectedValue) === fbState) {
+            pendingMap.delete(dev.controlPath);
+            if (pendingEl) pendingEl.style.display = 'none';
+          }
+  
+          // update UI from feedback (truth)
+          statusText.classList.remove('skeleton');
+          indicator.classList.remove('skeleton');
+          statusText.textContent = fbState ? 'ON' : 'OFF';
+          statusText.classList.toggle('muted', !fbState);
+          indicator.classList.toggle('on', !!fbState);
+          indicator.classList.toggle('off', !fbState);
+          if (track) {
+            track.classList.toggle('on', !!fbState);
+            track.setAttribute('aria-checked', fbState ? 'true' : 'false');
+          }
         }
-
-        // animate to new feedback value
-        animateSliderTo(slider, valueEl, current, target, 300);
-
-      } else { // switch
-        const statusText = document.getElementById(`statusText${dev.id}`);
-        const indicator = document.getElementById(`indicator${dev.id}`);
-        const track = document.getElementById(`track${dev.id}`);
-        const pendingEl = document.getElementById(`pending${dev.id}`);
-
-        const fbState = !!val;
-
-        // hide pending if matches expectation
-        const pendingInfo = pendingMap.get(dev.controlPath);
-        if (pendingInfo && pendingInfo.expectedValue !== undefined && (!!pendingInfo.expectedValue) === fbState) {
-          pendingMap.delete(dev.controlPath);
-          if (pendingEl) pendingEl.style.display = 'none';
-        }
-
-        // update UI from feedback (truth)
-        statusText.classList.remove('skeleton');
-        indicator.classList.remove('skeleton');
-        statusText.textContent = fbState ? 'ON' : 'OFF';
-        statusText.classList.toggle('muted', !fbState);
-        indicator.classList.toggle('on', !!fbState);
-        indicator.classList.toggle('off', !fbState);
-        if (track) {
-          track.classList.toggle('on', !!fbState);
-          track.setAttribute('aria-checked', fbState ? 'true' : 'false');
-        }
-      }
-      // Update online count based on feedback values (sliders > 0 considered ON)
-      refreshOnlineCount();
-    }, (err) => {
-      console.error('Feedback onValue error for', dev.feedbackPath, err);
-    });
-
-    listeners.push(unsubFeedback);
+        // Update online count based on feedback values (sliders > 0 considered ON)
+        refreshOnlineCount();
+      }, (err) => {
+        console.error('Feedback onValue error for', dev.feedbackPath, err);
+      });
+  
+      listeners.push(unsubFeedback);
+    }
 
     // UI actions: on user interaction write to controlPath but DO NOT update UI from command
     if (dev.type === 'slider') {
@@ -243,7 +267,12 @@ function startFeedbackFirstControl() {
           try {
             await set(ref(database, dev.controlPath), next);
             // mark expected value; will be cleared when feedback equals it
-            pendingMap.set(dev.controlPath, { expectedValue: next });
+            if (dev.feedbackMode === 'verified') {
+              pendingMap.set(dev.controlPath, { expectedValue: requested });
+            } else {
+              // assumed success → update UI immediately
+              updateSwitchUI(dev.id, requested);
+            }
           } catch (err) {
             console.error('Slider write error', err);
             showError('Failed to send slider command: ' + (err.message || err));
@@ -308,22 +337,37 @@ function startFeedbackFirstControl() {
 
       // clicking track writes control request to controlPath; UI remains driven by feedback only
       async function onToggleRequest() {
-        // show pending
         if (pendingEl) pendingEl.style.display = 'block';
+      
         try {
-          // read current feedback (truth) to determine requested target (flip)
-          const fbSnap = await get(ref(database, dev.feedbackPath));
-          const current = fbSnap && fbSnap.exists() ? !!fbSnap.val() : false;
-          const requested = current ? 0 : 1; // write 0/1 to control path
+          let requested;
+      
+          if (dev.feedbackMode === 'verified') {
+            const fbSnap = await get(ref(database, dev.feedbackPath));
+            const current = fbSnap && fbSnap.exists() ? !!fbSnap.val() : false;
+            requested = current ? 0 : 1;
+          } else {
+            // assumed device → toggle UI state
+            const trackOn = track.classList.contains('on');
+            requested = trackOn ? 0 : 1;
+            updateSwitchUI(dev.id, requested);
+          }
+      
           await set(ref(database, dev.controlPath), requested);
-          pendingMap.set(dev.controlPath, { expectedValue: requested });
+      
+          if (dev.feedbackMode === 'verified') {
+            pendingMap.set(dev.controlPath, { expectedValue: requested });
+          } else {
+            if (pendingEl) pendingEl.style.display = 'none';
+          }
+      
         } catch (err) {
           console.error('Toggle request failed', err);
-          showError('Failed to send toggle request: ' + (err.message || err));
+          showError('Failed to send toggle request');
           if (pendingEl) pendingEl.style.display = 'none';
-          pendingMap.delete(dev.controlPath);
         }
       }
+
 
       // support click and keyboard activation
       track.addEventListener('click', onToggleRequest);
