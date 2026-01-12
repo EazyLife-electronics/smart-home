@@ -172,6 +172,8 @@ function animateSliderTo(sliderEl, valueEl, from, to, duration = 300) {
   requestAnimationFrame(step);
 }
 
+let heartbeatInterval = null;
+
 // Configure UI and listeners driven by feedback only
 function startFeedbackFirstControl() {
   // create cards
@@ -268,10 +270,10 @@ function startFeedbackFirstControl() {
             await set(ref(database, dev.controlPath), next);
             // mark expected value; will be cleared when feedback equals it
             if (dev.feedbackMode === 'verified') {
-              pendingMap.set(dev.controlPath, { expectedValue: requested });
+              pendingMap.set(dev.controlPath, { expectedValue: next });
             } else {
               // assumed success → update UI immediately
-              updateSwitchUI(dev.id, requested);
+              updateSwitchUI(dev.id, next);
             }
           } catch (err) {
             console.error('Slider write error', err);
@@ -345,7 +347,13 @@ function startFeedbackFirstControl() {
           if (dev.feedbackMode === 'verified') {
             const fbSnap = await get(ref(database, dev.feedbackPath));
             const current = fbSnap && fbSnap.exists() ? !!fbSnap.val() : false;
-            requested = current ? 0 : 1;
+            const pending = pendingMap.get(dev.controlPath);
+            if (pending) {
+              requested = pending.expectedValue === 1 ? 0 : 1;
+            } else {
+              requested = current ? 0 : 1;
+            }
+
           } else {
             // assumed device → toggle UI state
             const trackOn = track.classList.contains('on');
@@ -417,12 +425,15 @@ function startFeedbackFirstControl() {
   listeners.push(unsubHb);
   
   // check periodically for stale heartbeat
-  setInterval(checkHeartbeatAlive, 1500);
+  if (!heartbeatInterval) {
+    heartbeatInterval = setInterval(checkHeartbeatAlive, 1500);
+  }
+
 }
 
 
 let lastHeartbeatReceivedAt = 0;
-(function ensureHeartbeatReceiver() {
+/*(function ensureHeartbeatReceiver() {
   const hbRef = ref(database, '/heartbeat');
   onValue(hbRef, (snap) => {
     if (snap && snap.exists()) {
@@ -438,8 +449,8 @@ let lastHeartbeatReceivedAt = 0;
         });
       }
     }
-  }, (err) => { /* ignore additional heartbeat errors here */ });
-})();
+  }, (err) => { /* ignore additional heartbeat errors here *//* });
+})();*/
 
 // Check function uses lastHeartbeatReceivedAt
 function checkHeartbeatAlive() {
@@ -463,6 +474,7 @@ function checkHeartbeatAlive() {
 async function refreshOnlineCount() {
   try {
     const checks = DEVICES.map(async d => {
+      if (!d.feedbackPath) return false;
       const fbSnap = await get(ref(database, d.feedbackPath));
       if (!fbSnap || !fbSnap.exists()) return false;
       const val = fbSnap.val();
