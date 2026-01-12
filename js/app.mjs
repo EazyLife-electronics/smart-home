@@ -357,7 +357,7 @@ function startFeedbackFirstControl() {
           } else {
             // assumed device → toggle UI state
             const trackOn = track.classList.contains('on');
-            requested = trackOn ? 0 : 1;
+            requested = trackOn ? 1 : 0;
             updateSwitchUI(dev.id, requested);
           }
       
@@ -433,7 +433,7 @@ function startFeedbackFirstControl() {
 
 
 let lastHeartbeatReceivedAt = 0;
-/*(function ensureHeartbeatReceiver() {
+(function ensureHeartbeatReceiver() {
   const hbRef = ref(database, '/heartbeat');
   onValue(hbRef, (snap) => {
     if (snap && snap.exists()) {
@@ -449,8 +449,8 @@ let lastHeartbeatReceivedAt = 0;
         });
       }
     }
-  }, (err) => { /* ignore additional heartbeat errors here *//* });
-})();*/
+  }, (err) => { /* ignore additional heartbeat errors here */ });
+})();
 
 // Check function uses lastHeartbeatReceivedAt
 function checkHeartbeatAlive() {
