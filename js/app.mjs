@@ -24,7 +24,8 @@ const allOffBtn = document.getElementById('allOffBtn');
 const errorBanner = document.getElementById('errorBanner');
 
 // Heartbeat offline threshold (ms)
-const HEARTBEAT_STALE_MS = 7000; // consider offline if no heartbeat within ~7s
+//const HEARTBEAT_STALE_MS = 7000; // consider offline if no heartbeat within ~7s
+const HEARTBEAT_STALE_MS = 60000; // consider offline if no heartbeat within ~60s (for testing via database)
 
 // Debounce config
 const SLIDER_DEBOUNCE_MS = 300;
