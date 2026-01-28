@@ -42,6 +42,11 @@ Servo bedRoomWindowServo;
 #define LOAD_SITTING 0
 #define LOAD_BEDROOM 1
 
+/************ COMMAND ACKS ************/
+// store last processed cmdId per device so identical re-writes can be processed once
+String lastCmdId_sitting = "";
+String lastCmdId_bed = "";
+
 /***************************************************/
 void setup() {
 
@@ -110,7 +115,6 @@ void loop() {
     updateLoadFeedback(LOAD_SITTING);
     updateLoadFeedback(LOAD_BEDROOM);
 
-
     delay(50);
     Firebase.RTDB.readStream(&stream);
   }
@@ -118,6 +122,18 @@ void loop() {
 
 /***************************************************
  * FIREBASE LISTENER
+ *
+ * New behavior: control nodes now have two children:
+ *   /control/<deviceKey>/value   (int)
+ *   /control/<deviceKey>/cmdId   (string)
+ *
+ * The stream will trigger when either child changes; we read both children,
+ * and if cmdId differs from last processed cmdId for the device, we process
+ * the command (apply relay/servo) and then write an ack at:
+ *   /feedbackMeta/<deviceKey>/lastCmdId = <cmdId>
+ *
+ * The scalar feedback remains at:
+ *   /feedback/<deviceKey> (unchanged behavior for UI compatibility)
  ***************************************************/
 void streamCallback(FirebaseStream data) {
 
@@ -125,32 +141,75 @@ void streamCallback(FirebaseStream data) {
 
   if (!systemReady) return;
 
-  if (data.dataTypeEnum() != fb_esp_rtdb_data_type_integer &&
-      data.dataTypeEnum() != fb_esp_rtdb_data_type_boolean) return;
+  String path = data.dataPath(); // e.g. "/sittingRoomLight/cmdId" or "/sittingRoomLight/value"
+  Serial.print("Stream Path: ");
+  Serial.println(path);
 
-  String path = data.dataPath();
-  int value = data.intData();
-
-  Serial.print("Path: ");
-  Serial.print(path);
-  Serial.print("  Value: ");
-  Serial.println(value);
-
-  if (path == "/sittingRoomLight") handleRelay(1, value);
-  else if (path == "/bedRoomLight") handleRelay(2, value);
-  else if (path == "/sittingRoomSocket") handleRelay(3, value);
-  else if (path == "/bedRoomSocket") handleRelay(4, value);
-  else if (path == "/sittingRoomWindow") handleServo(1, value);
-  else if (path == "/bedRoomWindow") handleServo(2, value);
+  // We will handle every event under /control children. Identify device.
+  if (path.startsWith("/sittingRoomLight")) {
+    handleControlForDevice("sittingRoomLight", 1);
+  } else if (path.startsWith("/bedRoomLight")) {
+    handleControlForDevice("bedRoomLight", 2);
+  } else if (path.startsWith("/sittingRoomSocket")) {
+    handleControlForDevice("sittingRoomSocket", 3);
+  } else if (path.startsWith("/bedRoomSocket")) {
+    handleControlForDevice("bedRoomSocket", 4);
+  } else if (path.startsWith("/sittingRoomWindow")) {
+    handleControlForServo("sittingRoomWindow", 1);
+  } else if (path.startsWith("/bedRoomWindow")) {
+    handleControlForServo("bedRoomWindow", 2);
+  }
 }
-
 
 void streamTimeout(bool timeout) {
   if (timeout) Serial.println("Firebase stream timeout");
 }
 
 /***************************************************
+ * HELPERS: read control children and process commands
+ ***************************************************/
+bool readControlValueInt(const String &deviceKey, int &outValue) {
+  String valuePath = "/control/" + deviceKey + "/value";
+  if (!Firebase.RTDB.getInt(&fbdo, valuePath)) {
+    Serial.print("getInt failed for ");
+    Serial.println(valuePath);
+    Serial.println(fbdo.errorReason());
+    return false;
+  }
+  outValue = fbdo.intData();
+  return true;
+}
+
+bool readControlCmdId(const String &deviceKey, String &outCmdId) {
+  String cmdPath = "/control/" + deviceKey + "/cmdId";
+  if (!Firebase.RTDB.getString(&fbdo, cmdPath)) {
+    // It's okay if it doesn't exist yet, return empty string
+    outCmdId = "";
+    // Not treating as fatal
+    return false;
+  }
+  outCmdId = fbdo.stringData();
+  return true;
+}
+
+void writeAckLastCmdId(const String &deviceKey, const String &cmdId) {
+  String ackPath = "/feedbackMeta/" + deviceKey + "/lastCmdId";
+  if (!Firebase.RTDB.setString(&fbdo, ackPath, cmdId)) {
+    Serial.print("Failed to write ack ");
+    Serial.println(ackPath);
+    Serial.println(fbdo.errorReason());
+  } else {
+    Serial.print("Wrote ack ");
+    Serial.print(ackPath);
+    Serial.print(" = ");
+    Serial.println(cmdId);
+  }
+}
+
+/***************************************************
  * RELAY CONTROL (ONLINE COMMAND)
+ *
+ * Note: This now expects we call this when a new cmdId is detected.
  ***************************************************/
 void handleRelay(uint8_t index, int value) {
 
@@ -167,17 +226,75 @@ void handleRelay(uint8_t index, int value) {
 
   digitalWrite(pin, value ? HIGH : LOW);
 
-  // FORCE feedback sync
+  // FORCE feedback sync (write the scalar feedback - unchanged behavior)
   if (loadIndex != -1) {
-    updateLoadFeedback(loadIndex);
+    // Pass true to write whatever the current load reads even if unchanged
+    updateLoadFeedback(loadIndex, true);
   }
 }
 
+/***************************************************
+ * Read and process control children for relays
+ ***************************************************/
+void handleControlForDevice(const String &deviceKey, uint8_t index) {
+  // Read both value and cmdId
+  int value = 0;
+  readControlValueInt(deviceKey, value); // if fails, value defaults to 0
+  String cmdId;
+  readControlCmdId(deviceKey, cmdId); // may return false and leave cmdId empty
+
+  // Select the last processed cmdId pointer
+  String *lastPtr = nullptr;
+  if (index == 1) lastPtr = &lastCmdId_sitting;
+  else if (index == 2) lastPtr = &lastCmdId_bed;
+  // sockets (3,4) currently not tracked with cmdId in firmware (they are "assumed" devices), but we still can process
+
+  // If no cmdId was provided, we treat this as a simple value write (legacy behavior)
+  if (cmdId == "") {
+    // legacy/compatibility: if plain integer under /control/<device> (older clients), just apply value
+    // special-case: check "/control/<device>" integer root
+    // Attempt to read root value if present
+    String rootPath = "/control/" + deviceKey;
+    if (Firebase.RTDB.getInt(&fbdo, rootPath)) {
+      int rootVal = fbdo.intData();
+      Serial.print("Legacy root value for ");
+      Serial.print(deviceKey);
+      Serial.print(" = ");
+      Serial.println(rootVal);
+      handleRelay(index, rootVal);
+    } else {
+      // apply the value read from /control/<device>/value if any
+      handleRelay(index, value);
+    }
+    return;
+  }
+
+  // If we have a cmdId, process only when it differs from last processed
+  String last = (lastPtr != nullptr) ? *lastPtr : String("");
+  if (cmdId != last) {
+    Serial.print("New cmdId for ");
+    Serial.print(deviceKey);
+    Serial.print(": ");
+    Serial.println(cmdId);
+    // Apply command (relay)
+    handleRelay(index, value);
+
+    // Update last processed cmdId and write ack meta
+    if (lastPtr != nullptr) {
+      *lastPtr = cmdId;
+    }
+    writeAckLastCmdId(deviceKey, cmdId);
+  } else {
+    Serial.print("Duplicate cmdId (ignored): ");
+    Serial.println(cmdId);
+  }
+}
 
 /***************************************************
  * READ LOAD STATE (TRUTH SOURCE)
+ *
+ * Note: readLoad returns 1 when the load is ON (same semantic as before).
  ***************************************************/
-
 int readLoad(uint8_t index) {
   if (index == LOAD_SITTING)
     return digitalRead(sittingRoomLightFeedbackPin) == HIGH ? 0 : 1;
@@ -190,13 +307,16 @@ int readLoad(uint8_t index) {
 
 /***************************************************
  * LOAD FEEDBACK SYNC
+ *
+ * Modified to accept a 'forceWrite' parameter so we can
+ * acknowledge commands even when the feedback value hasn't changed.
  ***************************************************/
-void updateLoadFeedback(uint8_t index) {
+void updateLoadFeedback(uint8_t index, bool forceWrite=false) {
   static int lastState[2] = { -1, -1 };
 
   int current = readLoad(index);
 
-  if (current == lastState[index]) return;
+  if (current == lastState[index] && !forceWrite) return;
   lastState[index] = current;
 
   bool ok = false;
@@ -227,8 +347,6 @@ void updateLoadFeedback(uint8_t index) {
   }
 }
 
-
-
 /***************************************************
  * SAFE RELAY STARTUP
  ***************************************************/
@@ -247,6 +365,9 @@ void relayStartupSync() {
 
 /***************************************************
  * SERVO COMMAND HANDLER
+ *
+ * We treat servos similarly: check cmdId under /control/<device>/cmdId
+ * and process when it differs from last processed id.
  ***************************************************/
 void handleServo(uint8_t index, int percent) {
   static int lastPercent[3] = { -1, -1, -1 };
@@ -261,5 +382,52 @@ void handleServo(uint8_t index, int percent) {
     sittingRoomWindowServo.write(angle);
   } else if (index == 2) {
     bedRoomWindowServo.write(angle);
+  }
+}
+
+/***************************************************
+ * Convenience wrapper: when control change is for a servo,
+ * read control children and process using cmdId semantics
+ ***************************************************/
+void handleControlForServo(const String &deviceKey, uint8_t index) {
+  int value = 0;
+  readControlValueInt(deviceKey, value);
+  String cmdId;
+  readControlCmdId(deviceKey, cmdId);
+
+  // If no cmdId, attempt legacy root value
+  if (cmdId == "") {
+    String rootPath = "/control/" + deviceKey;
+    if (Firebase.RTDB.getInt(&fbdo, rootPath)) {
+      int rootVal = fbdo.intData();
+      Serial.print("Legacy servo root value for ");
+      Serial.print(deviceKey);
+      Serial.print(" = ");
+      Serial.println(rootVal);
+      handleServo(index, rootVal);
+    } else {
+      handleServo(index, value);
+    }
+    return;
+  }
+
+  // For servos we track lastCmdId per-device by reusing sitting/bed globals
+  String *lastPtr = nullptr;
+  if (index == 1) lastPtr = &lastCmdId_sitting;
+  else if (index == 2) lastPtr = &lastCmdId_bed;
+
+  String last = (lastPtr != nullptr) ? *lastPtr : String("");
+  if (cmdId != last) {
+    Serial.print("New servo cmdId for ");
+    Serial.print(deviceKey);
+    Serial.print(": ");
+    Serial.println(cmdId);
+    handleServo(index, value);
+    if (lastPtr != nullptr) *lastPtr = cmdId;
+    // Write an ack in feedbackMeta for servo too
+    writeAckLastCmdId(deviceKey, cmdId);
+  } else {
+    Serial.print("Duplicate servo cmdId (ignored): ");
+    Serial.println(cmdId);
   }
 }
