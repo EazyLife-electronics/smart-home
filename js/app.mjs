@@ -73,13 +73,15 @@ function createCard(device) {
   card.className = 'card relay-card';
   card.id = `card-${device.id}`;
 
+  const displayedPath = device.feedbackPath ?? device.controlPath;
+
   if (device.type === 'slider') {
     card.innerHTML = `
       <div class="relay-header">
         <div class="relay-icon" aria-hidden="true">🪟</div>
         <div style="flex:1;margin-left:8px">
           <div class="relay-title">${device.label}</div>
-          <div class="small">Path: <span class="small muted">${device.feedbackPath}</span></div>
+          <div class="small">Path: <span class="small muted">${displayedPath}</span></div>
         </div>
       </div>
 
@@ -104,7 +106,7 @@ function createCard(device) {
         <div class="relay-icon" aria-hidden="true">🔌</div>
         <div style="flex:1;margin-left:8px">
           <div class="relay-title">${device.label}</div>
-          <div class="small">Path: <span class="small muted">${device.feedbackPath}</span></div>
+          <div class="small">Path: <span class="small muted">${displayedPath}</span></div>
         </div>
       </div>
 
@@ -132,10 +134,16 @@ function createCard(device) {
 function applyOfflineVisual(card, isOffline) {
   if (isOffline) {
     card.style.opacity = '0.5';
-    card.querySelectorAll('button, input[type="range"], label.track').forEach(el => el.setAttribute('disabled', 'disabled'));
+    card.querySelectorAll('button, input[type="range"], label.track').forEach(el => {
+      el.setAttribute('disabled', 'disabled');
+      if (el.tagName === 'LABEL') el.setAttribute('aria-disabled', 'true');
+    });
   } else {
     card.style.opacity = '';
-    card.querySelectorAll('button, input[type="range"], label.track').forEach(el => el.removeAttribute('disabled'));
+    card.querySelectorAll('button, input[type="range"], label.track').forEach(el => {
+      el.removeAttribute('disabled');
+      if (el.tagName === 'LABEL') el.removeAttribute('aria-disabled');
+    });
   }
 }
 
@@ -188,15 +196,15 @@ function startFeedbackFirstControl() {
       const unsubFeedback = onValue(fbRef, (snap) => {
         // heartbeat may indicate offline => handled separately
         const val = snap.val();
-  
+
         // Update UI from feedback (truth)
         if (dev.type === 'slider') {
           const slider = document.getElementById(`slider${dev.id}`);
           const valueEl = document.getElementById(`sliderValue${dev.id}`);
           const pendingEl = document.getElementById(`pending${dev.id}`);
-          const current = Number(slider.value || 0);
+          const current = Number(slider?.value || 0);
           const target = Number(val ?? 0);
-  
+
           // hide pending if feedback equals expected value
           const pendingInfo = pendingMap.get(dev.controlPath);
           if (pendingInfo && pendingInfo.expectedValue !== undefined && pendingInfo.expectedValue === target) {
@@ -204,29 +212,25 @@ function startFeedbackFirstControl() {
             pendingMap.delete(dev.controlPath);
             if (pendingEl) pendingEl.style.display = 'none';
           }
-  
-          // animate to new feedback value
-          if (dev.feedbackMode === 'assumed') {
-            animateSliderTo(slider, valueEl, current, target, 300);
-            return;
-          }
-          //animateSliderTo(slider, valueEl, current, target, 300);
-  
+
+          // animate to new feedback value (always animate regardless of feedbackMode)
+          animateSliderTo(slider, valueEl, current, target, 300);
+
         } else { // switch
           const statusText = document.getElementById(`statusText${dev.id}`);
           const indicator = document.getElementById(`indicator${dev.id}`);
           const track = document.getElementById(`track${dev.id}`);
           const pendingEl = document.getElementById(`pending${dev.id}`);
-  
+
           const fbState = !!val;
-  
+
           // hide pending if matches expectation
           const pendingInfo = pendingMap.get(dev.controlPath);
           if (pendingInfo && pendingInfo.expectedValue !== undefined && (!!pendingInfo.expectedValue) === fbState) {
             pendingMap.delete(dev.controlPath);
             if (pendingEl) pendingEl.style.display = 'none';
           }
-  
+
           // update UI from feedback (truth)
           statusText.classList.remove('skeleton');
           indicator.classList.remove('skeleton');
@@ -244,7 +248,7 @@ function startFeedbackFirstControl() {
       }, (err) => {
         console.error('Feedback onValue error for', dev.feedbackPath, err);
       });
-  
+
       listeners.push(unsubFeedback);
     }
 
@@ -255,6 +259,7 @@ function startFeedbackFirstControl() {
       const btnHalf = document.getElementById(`presetHalf${dev.id}`);
       const btnClose = document.getElementById(`presetClose${dev.id}`);
       const pendingEl = document.getElementById(`pending${dev.id}`);
+      const valueEl = document.getElementById(`sliderValue${dev.id}`);
 
       // debounce on input: schedule write; but UI values only come from feedback
       slider.addEventListener('input', (ev) => {
@@ -272,8 +277,10 @@ function startFeedbackFirstControl() {
             if (dev.feedbackMode === 'verified') {
               pendingMap.set(dev.controlPath, { expectedValue: next });
             } else {
-              // assumed success → update UI immediately
-              updateSwitchUI(dev.id, next);
+              // assumed success → update slider UI immediately
+              if (valueEl) valueEl.textContent = `${next}%`;
+              if (slider) slider.value = next;
+              if (pendingEl) pendingEl.style.display = 'none';
             }
           } catch (err) {
             console.error('Slider write error', err);
@@ -297,7 +304,15 @@ function startFeedbackFirstControl() {
         const next = Number(ev.target.value);
         try {
           await set(ref(database, dev.controlPath), next);
-          pendingMap.set(dev.controlPath, { expectedValue: next });
+          if (dev.feedbackMode === 'verified') {
+            pendingMap.set(dev.controlPath, { expectedValue: next });
+            if (pendingEl) pendingEl.style.display = 'block';
+          } else {
+            // assumed success → update UI immediately
+            if (valueEl) valueEl.textContent = `${next}%`;
+            if (slider) slider.value = next;
+            if (pendingEl) pendingEl.style.display = 'none';
+          }
         } catch (err) {
           console.error('Slider immediate write error', err);
           showError('Failed to send slider command: ' + (err.message || err));
@@ -320,7 +335,16 @@ function startFeedbackFirstControl() {
             value = Number(local[which]);
           }
           await set(ref(database, dev.controlPath), value);
-          pendingMap.set(dev.controlPath, { expectedValue: value });
+          if (dev.feedbackMode === 'verified') {
+            pendingMap.set(dev.controlPath, { expectedValue: value });
+          } else {
+            // assumed → update UI immediately
+            const valueEl = document.getElementById(`sliderValue${dev.id}`);
+            const sliderEl = document.getElementById(`slider${dev.id}`);
+            if (valueEl) valueEl.textContent = `${value}%`;
+            if (sliderEl) sliderEl.value = value;
+            if (pendingEl) pendingEl.style.display = 'none';
+          }
         } catch (err) {
           console.error('Preset apply failed', err);
           showError('Failed to apply preset: ' + (err.message || err));
@@ -340,10 +364,10 @@ function startFeedbackFirstControl() {
       // clicking track writes control request to controlPath; UI remains driven by feedback only
       async function onToggleRequest() {
         if (pendingEl) pendingEl.style.display = 'block';
-      
+
         try {
           let requested;
-      
+
           if (dev.feedbackMode === 'verified') {
             const fbSnap = await get(ref(database, dev.feedbackPath));
             const current = fbSnap && fbSnap.exists() ? !!fbSnap.val() : false;
@@ -355,20 +379,20 @@ function startFeedbackFirstControl() {
             }
 
           } else {
-            // assumed device → toggle UI state
+            // assumed device → toggle UI state (immediate)
             const trackOn = track.classList.contains('on');
-            requested = trackOn ? 1 : 0;
+            requested = trackOn ? 0 : 1; // if currently on, we want 0; else 1
             updateSwitchUI(dev.id, requested);
           }
-      
+
           await set(ref(database, dev.controlPath), requested);
-      
+
           if (dev.feedbackMode === 'verified') {
             pendingMap.set(dev.controlPath, { expectedValue: requested });
           } else {
             if (pendingEl) pendingEl.style.display = 'none';
           }
-      
+
         } catch (err) {
           console.error('Toggle request failed', err);
           showError('Failed to send toggle request');
@@ -423,7 +447,7 @@ function startFeedbackFirstControl() {
     console.warn('Heartbeat subscription error', err);
   });
   listeners.push(unsubHb);
-  
+
   // check periodically for stale heartbeat
   if (!heartbeatInterval) {
     heartbeatInterval = setInterval(checkHeartbeatAlive, 1500);
