@@ -24,8 +24,8 @@ const allOffBtn = document.getElementById('allOffBtn');
 const errorBanner = document.getElementById('errorBanner');
 
 // Heartbeat offline threshold (ms)
-//const HEARTBEAT_STALE_MS = 7000; // consider offline if no heartbeat within ~7s
-const HEARTBEAT_STALE_MS = 60000; // consider offline if no heartbeat within ~60s (for testing via database)
+const HEARTBEAT_STALE_MS = 7000; // consider offline if no heartbeat within ~7s
+
 // Debounce config
 const SLIDER_DEBOUNCE_MS = 300;
 
@@ -53,7 +53,7 @@ const LOCAL_DEFAULT_PRESETS = {
 
 // runtime state
 const listeners = [];
-// pendingMap: controlPath -> { expectedValue, timeoutId }
+// pendingMap: controlPath -> { expectedValue, cmdId, timeoutId }
 const pendingMap = new Map();
 const sliderDebounceTimers = new Map(); // controlPath -> timer id
 let lastHeartbeat = 0;
@@ -187,7 +187,7 @@ function animateSliderTo(sliderEl, valueEl, from, to, duration = 300) {
 let heartbeatInterval = null;
 
 // Pending helpers
-function setPending(dev, expectedValue) {
+function setPending(dev, expectedValue, cmdId = undefined) {
   const controlPath = dev.controlPath;
   // clear existing pending for path
   clearPending(controlPath);
@@ -206,15 +206,7 @@ function setPending(dev, expectedValue) {
     showError('Command not confirmed (timeout).');
   }, PENDING_CONFIRM_TIMEOUT_MS);
 
-  pendingMap.set(controlPath, { expectedValue, timeoutId });
-
-  // If we already have a feedbackPath, check immediately if the feedback already equals expectedValue
-  if (dev.feedbackPath) {
-    confirmPendingIfMatches(dev).catch(e => {
-      // ignore errors here - confirmation will happen when onValue fires
-      console.warn('Immediate pending confirmation check failed', e);
-    });
-  }
+  pendingMap.set(controlPath, { expectedValue, cmdId, timeoutId });
 }
 
 function clearPending(controlPath) {
@@ -227,19 +219,23 @@ function clearPending(controlPath) {
 async function confirmPendingIfMatches(dev) {
   const info = pendingMap.get(dev.controlPath);
   if (!info || typeof info.expectedValue === 'undefined') return;
-  if (!dev.feedbackPath) return;
+  if (!info.cmdId) return; // no cmdId attached
+
+  // derive device key from controlPath: '/control/sittingRoomLight' => '/sittingRoomLight'
+  const deviceKey = dev.controlPath.replace('/control', '');
+  const metaPath = '/feedbackMeta' + deviceKey;
+
   try {
-    const fbSnap = await get(ref(database, dev.feedbackPath));
-    if (!fbSnap || !fbSnap.exists()) return;
-    const fbVal = fbSnap.val();
-    // For switches ensure boolean-equivalent compare; for sliders numeric
-    const expected = info.expectedValue;
-    const matches = (dev.type === 'slider') ? (Number(fbVal) === Number(expected)) : ((!!fbVal) === (!!expected));
-    if (matches) {
-      // hide pending
-      clearPending(dev.controlPath);
-      const pendingEl = document.getElementById(`pending${dev.id}`);
-      if (pendingEl) pendingEl.style.display = 'none';
+    const metaSnap = await get(ref(database, metaPath));
+    if (metaSnap && metaSnap.exists()) {
+      const meta = metaSnap.val();
+      const lastCmdId = meta && meta.lastCmdId ? meta.lastCmdId : null;
+      if (lastCmdId && lastCmdId === info.cmdId) {
+        // hide pending
+        clearPending(dev.controlPath);
+        const pendingEl = document.getElementById(`pending${dev.id}`);
+        if (pendingEl) pendingEl.style.display = 'none';
+      }
     }
   } catch (e) {
     console.warn('confirmPendingIfMatches error', e);
@@ -252,9 +248,9 @@ async function startFeedbackFirstControl() {
   relayGrid.innerHTML = '';
   DEVICES.forEach(dev => relayGrid.appendChild(createCard(dev)));
 
-  // subscribe to feedback paths
+  // subscribe to feedback paths and feedbackMeta ack paths
   DEVICES.forEach(dev => {
-    // feedback listener
+    // feedback listener (value)
     if (dev.feedbackPath) {
       const fbRef = ref(database, dev.feedbackPath);
       const unsubFeedback = onValue(fbRef, (snap) => {
@@ -316,6 +312,28 @@ async function startFeedbackFirstControl() {
       listeners.push(unsubFeedback);
     }
 
+    // ack listener: listen to /feedbackMeta/<deviceKey>
+    // This is used to clear pending when device processed the command even if value didn't change
+    const deviceKey = dev.controlPath.replace('/control', '');
+    const metaRef = ref(database, '/feedbackMeta' + deviceKey);
+    const unsubMeta = onValue(metaRef, (snap) => {
+      if (!snap || !snap.exists()) return;
+      const meta = snap.val();
+      const lastCmdId = meta && meta.lastCmdId ? meta.lastCmdId : null;
+      if (!lastCmdId) return;
+
+      const pendingInfo = pendingMap.get(dev.controlPath);
+      if (pendingInfo && pendingInfo.cmdId && pendingInfo.cmdId === lastCmdId) {
+        // command acknowledged by device
+        clearPending(dev.controlPath);
+        const pendingEl = document.getElementById(`pending${dev.id}`);
+        if (pendingEl) pendingEl.style.display = 'none';
+      }
+    }, (err) => {
+      // ignore meta errors
+    });
+    listeners.push(unsubMeta);
+
     // UI actions: on user interaction write to controlPath but DO NOT update UI from command
     if (dev.type === 'slider') {
       const slider = document.getElementById(`slider${dev.id}`);
@@ -336,12 +354,18 @@ async function startFeedbackFirstControl() {
         if (sliderDebounceTimers.has(key)) clearTimeout(sliderDebounceTimers.get(key));
         const t = setTimeout(async () => {
           try {
-            await set(ref(database, dev.controlPath), next);
-            // mark expected value; will be cleared when feedback equals it
             if (dev.feedbackMode === 'verified') {
-              setPending(dev, next);
+              // generate cmdId and write both children
+              const cmdId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+              await set(ref(database, dev.controlPath + '/value'), next);
+              await set(ref(database, dev.controlPath + '/cmdId'), cmdId);
+              // record pending with cmdId
+              setPending(dev, next, cmdId);
+              // also trigger immediate confirmation check
+              confirmPendingIfMatches(dev);
             } else {
-              // assumed success → update slider UI immediately
+              // assumed success → update slider UI immediately and write only value
+              await set(ref(database, dev.controlPath + '/value'), next);
               if (valueEl) valueEl.textContent = `${next}%`;
               if (slider) slider.value = next;
               if (pendingEl) pendingEl.style.display = 'none';
@@ -367,12 +391,15 @@ async function startFeedbackFirstControl() {
         }
         const next = Number(ev.target.value);
         try {
-          await set(ref(database, dev.controlPath), next);
           if (dev.feedbackMode === 'verified') {
-            setPending(dev, next);
+            const cmdId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            await set(ref(database, dev.controlPath + '/value'), next);
+            await set(ref(database, dev.controlPath + '/cmdId'), cmdId);
+            setPending(dev, next, cmdId);
             if (pendingEl) pendingEl.style.display = 'block';
+            confirmPendingIfMatches(dev);
           } else {
-            // assumed success → update UI immediately
+            await set(ref(database, dev.controlPath + '/value'), next);
             if (valueEl) valueEl.textContent = `${next}%`;
             if (slider) slider.value = next;
             if (pendingEl) pendingEl.style.display = 'none';
@@ -398,11 +425,15 @@ async function startFeedbackFirstControl() {
             const local = LOCAL_DEFAULT_PRESETS[dev.controlPath] || { open: 100, half: 50, close: 0 };
             value = Number(local[which]);
           }
-          await set(ref(database, dev.controlPath), value);
+
           if (dev.feedbackMode === 'verified') {
-            setPending(dev, value);
+            const cmdId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            await set(ref(database, dev.controlPath + '/value'), value);
+            await set(ref(database, dev.controlPath + '/cmdId'), cmdId);
+            setPending(dev, value, cmdId);
+            confirmPendingIfMatches(dev);
           } else {
-            // assumed → update UI immediately
+            await set(ref(database, dev.controlPath + '/value'), value);
             const valueEl = document.getElementById(`sliderValue${dev.id}`);
             const sliderEl = document.getElementById(`slider${dev.id}`);
             if (valueEl) valueEl.textContent = `${value}%`;
@@ -433,27 +464,30 @@ async function startFeedbackFirstControl() {
           let requested;
 
           if (dev.feedbackMode === 'verified') {
+            // read current feedback to decide requested toggled value
             const fbSnap = await get(ref(database, dev.feedbackPath));
             const current = fbSnap && fbSnap.exists() ? !!fbSnap.val() : false;
             const pending = pendingMap.get(dev.controlPath);
-            if (pending) {
+            if (pending && typeof pending.expectedValue !== 'undefined') {
               requested = pending.expectedValue === 1 ? 0 : 1;
             } else {
               requested = current ? 0 : 1;
             }
+
+            // generate cmdId and write both children
+            const cmdId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            await set(ref(database, dev.controlPath + '/value'), requested);
+            await set(ref(database, dev.controlPath + '/cmdId'), cmdId);
+            setPending(dev, requested, cmdId);
+            // check immediately if device already acknowledged
+            confirmPendingIfMatches(dev);
 
           } else {
             // assumed device → toggle UI state (immediate)
             const trackOn = track.classList.contains('on');
             requested = trackOn ? 0 : 1; // if currently on, we want 0; else 1
             updateSwitchUI(dev.id, requested);
-          }
-
-          await set(ref(database, dev.controlPath), requested);
-
-          if (dev.feedbackMode === 'verified') {
-            setPending(dev, requested);
-          } else {
+            await set(ref(database, dev.controlPath), requested); // legacy clients may expect root scalar
             if (pendingEl) pendingEl.style.display = 'none';
           }
 
@@ -483,19 +517,20 @@ async function startFeedbackFirstControl() {
     const switchDevices = DEVICES.filter(d => d.type === 'switch');
     for (const d of switchDevices) {
       try {
-        // send 0 (OFF) as a command; UI will update from feedback when feedback shows off
-        await set(ref(database, d.controlPath), 0);
+        const pendingEl = document.getElementById(`pending${d.id}`);
         if (d.feedbackMode === 'verified') {
-          setPending(d, 0);
+          const cmdId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          await set(ref(database, d.controlPath + '/value'), 0);
+          await set(ref(database, d.controlPath + '/cmdId'), cmdId);
+          setPending(d, 0, cmdId);
+          if (pendingEl) pendingEl.style.display = 'block';
+          confirmPendingIfMatches(d);
         } else {
           // assumed: update UI immediately
           updateSwitchUI(d.id, 0);
-          const pendingEl = document.getElementById(`pending${d.id}`);
+          await set(ref(database, d.controlPath), 0); // legacy write
           if (pendingEl) pendingEl.style.display = 'none';
         }
-        // show pending on card (verified path will also show)
-        const pendingEl = document.getElementById(`pending${d.id}`);
-        if (pendingEl && d.feedbackMode === 'verified') pendingEl.style.display = 'block';
       } catch (err) {
         console.error('AllOff write failed', err);
         showError('Failed to send All Off: ' + (err.message || err));
