@@ -33,12 +33,14 @@ unsigned long lastHeartbeat = 0;
 #define bedRoomLightFeedbackPin 32
 
 /************ SERVOS ************/
-#define sittingRoomWindowServoPin 18
+#define sittingRoomWindowServoPin 27
 #define bedRoomWindowServoPin 26
 
 Servo sittingRoomWindowServo;
 Servo bedRoomWindowServo;
 
+#define LOAD_SITTING 0
+#define LOAD_BEDROOM 1
 
 /***************************************************/
 void setup() {
@@ -82,10 +84,9 @@ void setup() {
 
   // ---------- SAFE STARTUP SYNC ----------
   relayStartupSync();  // observe loads
-  servoStartupSync();  // report servo position
 
   // ---------- START LISTENER ----------
-  Firebase.RTDB.beginStream(&stream, "/controls");
+  Firebase.RTDB.beginStream(&stream, "/control");
   Firebase.RTDB.setStreamCallback(&stream, streamCallback, streamTimeout);
 
   systemReady = true;
@@ -105,14 +106,14 @@ void loop() {
         Serial.println("Heartbeat sent");
       }
     }
-  }
-  // Monitor physical switch changes
-  updateLoadFeedback(1);
-  updateLoadFeedback(2);
-  updateServoFeedback(1);
-  updateServoFeedback(2);
+    // Monitor physical switch changes
+    updateLoadFeedback(LOAD_SITTING);
+    updateLoadFeedback(LOAD_BEDROOM);
 
-  delay(200);
+
+    delay(50);
+    Firebase.RTDB.readStream(&stream);
+  }
 }
 
 /***************************************************
@@ -120,12 +121,20 @@ void loop() {
  ***************************************************/
 void streamCallback(FirebaseStream data) {
 
+  Serial.println("🔥 CALLBACK FIRED");
+
   if (!systemReady) return;
 
-  if (data.dataType() != "int") return;
+  if (data.dataTypeEnum() != fb_esp_rtdb_data_type_integer &&
+      data.dataTypeEnum() != fb_esp_rtdb_data_type_boolean) return;
 
   String path = data.dataPath();
   int value = data.intData();
+
+  Serial.print("Path: ");
+  Serial.print(path);
+  Serial.print("  Value: ");
+  Serial.println(value);
 
   if (path == "/sittingRoomLight") handleRelay(1, value);
   else if (path == "/bedRoomLight") handleRelay(2, value);
@@ -134,6 +143,7 @@ void streamCallback(FirebaseStream data) {
   else if (path == "/sittingRoomWindow") handleServo(1, value);
   else if (path == "/bedRoomWindow") handleServo(2, value);
 }
+
 
 void streamTimeout(bool timeout) {
   if (timeout) Serial.println("Firebase stream timeout");
@@ -145,32 +155,36 @@ void streamTimeout(bool timeout) {
 void handleRelay(uint8_t index, int value) {
 
   uint8_t pin;
+  int loadIndex=-1;
+
   switch (index) {
-    case 1: pin = sittingRoomLightRelayPin; break;
-    case 2: pin = bedRoomLightRelayPin; break;
+    case 1: pin = sittingRoomLightRelayPin; loadIndex = LOAD_SITTING; break;
+    case 2: pin = bedRoomLightRelayPin; loadIndex = LOAD_BEDROOM; break;
     case 3: pin = sittingRoomSocketRelayPin; break;
     case 4: pin = bedRoomSocketRelayPin; break;
     default: return;
   }
 
   digitalWrite(pin, value ? HIGH : LOW);
+
+  // FORCE feedback sync
+  if (loadIndex != -1) {
+    updateLoadFeedback(loadIndex);
+  }
 }
+
 
 /***************************************************
  * READ LOAD STATE (TRUTH SOURCE)
  ***************************************************/
+
 int readLoad(uint8_t index) {
-  if (index == 1) return digitalRead(sittingRoomLightFeedbackPin);
-  if (index == 2) return digitalRead(bedRoomLightFeedbackPin);
-  return 0;
-}
+  if (index == LOAD_SITTING)
+    return digitalRead(sittingRoomLightFeedbackPin) == HIGH ? 0 : 1;
 
-/***************************************************
- * READ LOAD STATE (TRUTH SOURCE)
- ***************************************************/
-int readServo(uint8_t index) {
-  if (index == 1) return sittingRoomWindowServo.read();
-  if (index == 2) return bedRoomWindowServo.read();
+  if (index == LOAD_BEDROOM)
+    return digitalRead(bedRoomLightFeedbackPin) == HIGH ? 0 : 1;
+
   return 0;
 }
 
@@ -178,33 +192,41 @@ int readServo(uint8_t index) {
  * LOAD FEEDBACK SYNC
  ***************************************************/
 void updateLoadFeedback(uint8_t index) {
-  static int lastState[3] = { -1, -1, -1 };
+  static int lastState[2] = { -1, -1 };
 
   int current = readLoad(index);
+
   if (current == lastState[index]) return;
   lastState[index] = current;
 
-  if (index == 1)
-    Firebase.RTDB.setInt(&fbdo, "/feedback/sittingRoomLightFeedback", current);
-  else if (index == 2)
-    Firebase.RTDB.setInt(&fbdo, "/feedback/bedRoomLightFeedback", current);
+  bool ok = false;
+
+  if (index == LOAD_SITTING) {
+    ok = Firebase.RTDB.setInt(
+      &fbdo,
+      "/feedback/sittingRoomLightFeedback",
+      current
+    );
+  }
+  else if (index == LOAD_BEDROOM) {
+    ok = Firebase.RTDB.setInt(
+      &fbdo,
+      "/feedback/bedRoomLightFeedback",
+      current
+    );
+  }
+
+  if (!ok) {
+    Serial.print("Feedback write failed: ");
+    Serial.println(fbdo.errorReason());
+  } else {
+    Serial.print("Feedback OK index ");
+    Serial.print(index);
+    Serial.print(" = ");
+    Serial.println(current);
+  }
 }
 
-/***************************************************
- * LOAD FEEDBACK SYNC
- ***************************************************/
-void updateServoFeedback(uint8_t index) {
-  static int lastState[3] = { -1, -1, -1 };
-
-  int current = map(readServo(index), 0, 180, 0, 100);
-  if (current == lastState[index]) return;
-  lastState[index] = current;
-
-  if (index == 1)
-    Firebase.RTDB.setInt(&fbdo, "/feedback/sittingRoomWindow", current);
-  else if (index == 2)
-    Firebase.RTDB.setInt(&fbdo, "/feedback/bedRoomWindow", current);
-}
 
 
 /***************************************************
@@ -219,17 +241,8 @@ void relayStartupSync() {
 
   delay(200);
 
-  Firebase.RTDB.setInt(&fbdo, "/feedback/sittingRoomLightFeedback", readLoad(1));
-  Firebase.RTDB.setInt(&fbdo, "/feedback/bedRoomLightFeedback", readLoad(2));
-}
-
-/***************************************************
- * SERVO STARTUP SYNC (NO MOVEMENT)
- ***************************************************/
-void servoStartupSync() {
-
-  Firebase.RTDB.setInt(&fbdo, "/feedback/sittingRoomWindow", map(sittingRoomWindowServo.read(), 0, 180, 0, 100));
-  Firebase.RTDB.setInt(&fbdo, "/feedback/bedRoomWindow", map(bedRoomWindowServo.read(), 0, 180, 0, 100));
+  Firebase.RTDB.setInt(&fbdo, "/feedback/sittingRoomLightFeedback", readLoad(LOAD_SITTING));
+  Firebase.RTDB.setInt(&fbdo, "/feedback/bedRoomLightFeedback", readLoad(LOAD_BEDROOM));
 }
 
 /***************************************************
