@@ -26,9 +26,11 @@ const errorBanner = document.getElementById('errorBanner');
 // Heartbeat offline threshold (ms)
 //const HEARTBEAT_STALE_MS = 7000; // consider offline if no heartbeat within ~7s
 const HEARTBEAT_STALE_MS = 60000; // consider offline if no heartbeat within ~60s (for testing via database)
-
 // Debounce config
 const SLIDER_DEBOUNCE_MS = 300;
+
+// Pending confirmation timeout
+const PENDING_CONFIRM_TIMEOUT_MS = 8000;
 
 // Devices: note controlPath (where UI writes commands) and feedbackPath (truth source, used for all UI)
 const DEVICES = [
@@ -51,7 +53,8 @@ const LOCAL_DEFAULT_PRESETS = {
 
 // runtime state
 const listeners = [];
-const pendingMap = new Map(); // controlPath -> { expectedValue, timeout? }
+// pendingMap: controlPath -> { expectedValue, timeoutId }
+const pendingMap = new Map();
 const sliderDebounceTimers = new Map(); // controlPath -> timer id
 let lastHeartbeat = 0;
 let heartbeatUnsub = null;
@@ -183,8 +186,68 @@ function animateSliderTo(sliderEl, valueEl, from, to, duration = 300) {
 
 let heartbeatInterval = null;
 
+// Pending helpers
+function setPending(dev, expectedValue) {
+  const controlPath = dev.controlPath;
+  // clear existing pending for path
+  clearPending(controlPath);
+
+  // show pending indicator on card if exists
+  const pendingEl = document.getElementById(`pending${dev.id}`);
+  if (pendingEl) pendingEl.style.display = 'block';
+
+  // set pending with timeout
+  const timeoutId = setTimeout(() => {
+    // on timeout, clear pending and show a warning
+    clearPending(controlPath);
+    if (pendingEl) {
+      pendingEl.style.display = 'none';
+    }
+    showError('Command not confirmed (timeout).');
+  }, PENDING_CONFIRM_TIMEOUT_MS);
+
+  pendingMap.set(controlPath, { expectedValue, timeoutId });
+
+  // If we already have a feedbackPath, check immediately if the feedback already equals expectedValue
+  if (dev.feedbackPath) {
+    confirmPendingIfMatches(dev).catch(e => {
+      // ignore errors here - confirmation will happen when onValue fires
+      console.warn('Immediate pending confirmation check failed', e);
+    });
+  }
+}
+
+function clearPending(controlPath) {
+  const info = pendingMap.get(controlPath);
+  if (!info) return;
+  if (info.timeoutId) clearTimeout(info.timeoutId);
+  pendingMap.delete(controlPath);
+}
+
+async function confirmPendingIfMatches(dev) {
+  const info = pendingMap.get(dev.controlPath);
+  if (!info || typeof info.expectedValue === 'undefined') return;
+  if (!dev.feedbackPath) return;
+  try {
+    const fbSnap = await get(ref(database, dev.feedbackPath));
+    if (!fbSnap || !fbSnap.exists()) return;
+    const fbVal = fbSnap.val();
+    // For switches ensure boolean-equivalent compare; for sliders numeric
+    const expected = info.expectedValue;
+    const matches = (dev.type === 'slider') ? (Number(fbVal) === Number(expected)) : ((!!fbVal) === (!!expected));
+    if (matches) {
+      // hide pending
+      clearPending(dev.controlPath);
+      const pendingEl = document.getElementById(`pending${dev.id}`);
+      if (pendingEl) pendingEl.style.display = 'none';
+    }
+  } catch (e) {
+    console.warn('confirmPendingIfMatches error', e);
+  }
+}
+
 // Configure UI and listeners driven by feedback only
-function startFeedbackFirstControl() {
+async function startFeedbackFirstControl() {
   // create cards
   relayGrid.innerHTML = '';
   DEVICES.forEach(dev => relayGrid.appendChild(createCard(dev)));
@@ -210,7 +273,7 @@ function startFeedbackFirstControl() {
           const pendingInfo = pendingMap.get(dev.controlPath);
           if (pendingInfo && pendingInfo.expectedValue !== undefined && pendingInfo.expectedValue === target) {
             // command confirmed
-            pendingMap.delete(dev.controlPath);
+            clearPending(dev.controlPath);
             if (pendingEl) pendingEl.style.display = 'none';
           }
 
@@ -228,7 +291,7 @@ function startFeedbackFirstControl() {
           // hide pending if matches expectation
           const pendingInfo = pendingMap.get(dev.controlPath);
           if (pendingInfo && pendingInfo.expectedValue !== undefined && (!!pendingInfo.expectedValue) === fbState) {
-            pendingMap.delete(dev.controlPath);
+            clearPending(dev.controlPath);
             if (pendingEl) pendingEl.style.display = 'none';
           }
 
@@ -276,7 +339,7 @@ function startFeedbackFirstControl() {
             await set(ref(database, dev.controlPath), next);
             // mark expected value; will be cleared when feedback equals it
             if (dev.feedbackMode === 'verified') {
-              pendingMap.set(dev.controlPath, { expectedValue: next });
+              setPending(dev, next);
             } else {
               // assumed success → update slider UI immediately
               if (valueEl) valueEl.textContent = `${next}%`;
@@ -287,7 +350,7 @@ function startFeedbackFirstControl() {
             console.error('Slider write error', err);
             showError('Failed to send slider command: ' + (err.message || err));
             if (pendingEl) pendingEl.style.display = 'none';
-            pendingMap.delete(dev.controlPath);
+            clearPending(dev.controlPath);
           } finally {
             sliderDebounceTimers.delete(key);
           }
@@ -306,7 +369,7 @@ function startFeedbackFirstControl() {
         try {
           await set(ref(database, dev.controlPath), next);
           if (dev.feedbackMode === 'verified') {
-            pendingMap.set(dev.controlPath, { expectedValue: next });
+            setPending(dev, next);
             if (pendingEl) pendingEl.style.display = 'block';
           } else {
             // assumed success → update UI immediately
@@ -318,7 +381,7 @@ function startFeedbackFirstControl() {
           console.error('Slider immediate write error', err);
           showError('Failed to send slider command: ' + (err.message || err));
           if (pendingEl) pendingEl.style.display = 'none';
-          pendingMap.delete(dev.controlPath);
+          clearPending(dev.controlPath);
         }
       });
 
@@ -337,7 +400,7 @@ function startFeedbackFirstControl() {
           }
           await set(ref(database, dev.controlPath), value);
           if (dev.feedbackMode === 'verified') {
-            pendingMap.set(dev.controlPath, { expectedValue: value });
+            setPending(dev, value);
           } else {
             // assumed → update UI immediately
             const valueEl = document.getElementById(`sliderValue${dev.id}`);
@@ -350,7 +413,7 @@ function startFeedbackFirstControl() {
           console.error('Preset apply failed', err);
           showError('Failed to apply preset: ' + (err.message || err));
           if (pendingEl) pendingEl.style.display = 'none';
-          pendingMap.delete(dev.controlPath);
+          clearPending(dev.controlPath);
         }
       }
 
@@ -389,7 +452,7 @@ function startFeedbackFirstControl() {
           await set(ref(database, dev.controlPath), requested);
 
           if (dev.feedbackMode === 'verified') {
-            pendingMap.set(dev.controlPath, { expectedValue: requested });
+            setPending(dev, requested);
           } else {
             if (pendingEl) pendingEl.style.display = 'none';
           }
@@ -410,6 +473,10 @@ function startFeedbackFirstControl() {
     }
   }); // end devices.forEach
 
+  // After listeners are attached, try to initialize UI from current feedback values
+  // This prevents UI showing stale/unknown states and avoids creating pending that never clears
+  await initializeUIFromFeedback();
+
   // Global All OFF button: write control requests for switch devices only
   allOffBtn.onclick = async () => {
     if (!confirm('Turn all devices OFF?')) return;
@@ -418,10 +485,17 @@ function startFeedbackFirstControl() {
       try {
         // send 0 (OFF) as a command; UI will update from feedback when feedback shows off
         await set(ref(database, d.controlPath), 0);
-        pendingMap.set(d.controlPath, { expectedValue: 0 });
-        // show pending on card
+        if (d.feedbackMode === 'verified') {
+          setPending(d, 0);
+        } else {
+          // assumed: update UI immediately
+          updateSwitchUI(d.id, 0);
+          const pendingEl = document.getElementById(`pending${d.id}`);
+          if (pendingEl) pendingEl.style.display = 'none';
+        }
+        // show pending on card (verified path will also show)
         const pendingEl = document.getElementById(`pending${d.id}`);
-        if (pendingEl) pendingEl.style.display = 'block';
+        if (pendingEl && d.feedbackMode === 'verified') pendingEl.style.display = 'block';
       } catch (err) {
         console.error('AllOff write failed', err);
         showError('Failed to send All Off: ' + (err.message || err));
@@ -456,6 +530,48 @@ function startFeedbackFirstControl() {
 
 }
 
+// Initialize UI from current feedback snaps (run once after listeners setup)
+async function initializeUIFromFeedback() {
+  try {
+    const tasks = DEVICES.map(async (dev) => {
+      if (!dev.feedbackPath) {
+        // For assumed devices leave initial UI as defaults (or could read controlPath if stored)
+        return;
+      }
+      try {
+        const snap = await get(ref(database, dev.feedbackPath));
+        if (!snap || !snap.exists()) return;
+        const val = snap.val();
+
+        if (dev.type === 'slider') {
+          const slider = document.getElementById(`slider${dev.id}`);
+          const valueEl = document.getElementById(`sliderValue${dev.id}`);
+          const target = Number(val ?? 0);
+          // set without animation for first render
+          if (slider) slider.value = target;
+          if (valueEl) valueEl.textContent = `${target}%`;
+        } else {
+          const fbState = !!val;
+          updateSwitchUI(dev.id, fbState);
+          // ensure no pending left if expected equals current
+          const pendingInfo = pendingMap.get(dev.controlPath);
+          if (pendingInfo && (!!pendingInfo.expectedValue) === fbState) {
+            clearPending(dev.controlPath);
+            const pendingEl = document.getElementById(`pending${dev.id}`);
+            if (pendingEl) pendingEl.style.display = 'none';
+          }
+        }
+      } catch (e) {
+        console.warn('initializeUIFromFeedback error for', dev.feedbackPath, e);
+      }
+    });
+    await Promise.all(tasks);
+    // refresh count after initialization
+    refreshOnlineCount();
+  } catch (e) {
+    console.warn('initializeUIFromFeedback error', e);
+  }
+}
 
 let lastHeartbeatReceivedAt = 0;
 (function ensureHeartbeatReceiver() {
@@ -548,6 +664,7 @@ onAuthStateChanged(auth, (user) => {
 
     // Try initializing feedback-driven UI safely
     try {
+      // startFeedbackFirstControl is async; we intentionally don't await here
       startFeedbackFirstControl();
     } catch (err) {
       console.error('Dashboard initialization failed', err);
