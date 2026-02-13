@@ -1,3 +1,15 @@
+#define DEBUG 0  // Set to 1 to enable Serial, 0 to disable entirely
+
+#if DEBUG
+  #define DEBUG_PRINT(x)       Serial.print(x)
+  #define DEBUG_PRINTLN(x)     Serial.println(x)
+  #define DEBUG_BEGIN(x)       Serial.begin(x)
+#else
+  #define DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x)
+  #define DEBUG_BEGIN(x)
+#endif
+
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
 #include <ESP32Servo.h>
@@ -23,18 +35,18 @@ bool systemReady = false;
 unsigned long lastHeartbeat = 0;
 
 /************ RELAYS ************/
-#define sittingRoomLightRelayPin 21
-#define bedRoomLightRelayPin 33
-#define sittingRoomSocketRelayPin 19
-#define bedRoomSocketRelayPin 25
+#define sittingRoomLightRelayPin 14
+#define bedRoomLightRelayPin 13
+#define sittingRoomSocketRelayPin 27
+#define bedRoomSocketRelayPin 12
 
 /************ LOAD FEEDBACK (INPUT ONLY PINS) ************/
-#define sittingRoomLightFeedbackPin 22
-#define bedRoomLightFeedbackPin 32
+#define sittingRoomLightFeedbackPin 32
+#define bedRoomLightFeedbackPin 33
 
 /************ SERVOS ************/
-#define sittingRoomWindowServoPin 27
-#define bedRoomWindowServoPin 26
+#define sittingRoomWindowServoPin 2
+#define bedRoomWindowServoPin 15
 
 Servo sittingRoomWindowServo;
 Servo bedRoomWindowServo;
@@ -46,11 +58,11 @@ Servo bedRoomWindowServo;
 // store last processed cmdId per device so identical re-writes can be processed once
 String lastCmdId_sitting = "";
 String lastCmdId_bed = "";
-
+void updateLoadFeedback(uint8_t index, bool forceWrite = false);
 /***************************************************/
 void setup() {
 
-  Serial.begin(115200);
+  DEBUG_BEGIN(115200);
 
   pinMode(sittingRoomLightRelayPin, OUTPUT);
   pinMode(bedRoomLightRelayPin, OUTPUT);
@@ -64,9 +76,9 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    DEBUG_PRINT(".");
   }
-  Serial.println("\nWiFi connected");
+  DEBUG_PRINTLN("\nWiFi connected");
 
   // ---------- FIREBASE ----------
   config.api_key = API_KEY;
@@ -76,12 +88,12 @@ void setup() {
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
-  Serial.print("Signing in");
+  DEBUG_PRINT("Signing in");
   while (auth.token.uid == "") {
-    Serial.print(".");
+    DEBUG_PRINT(".");
     delay(300);
   }
-  Serial.println("\nFirebase authenticated");
+  DEBUG_PRINTLN("\nFirebase authenticated");
 
   // ---------- SERVOS ----------
   sittingRoomWindowServo.attach(sittingRoomWindowServoPin);
@@ -95,7 +107,7 @@ void setup() {
   Firebase.RTDB.setStreamCallback(&stream, streamCallback, streamTimeout);
 
   systemReady = true;
-  Serial.println("System READY");
+  DEBUG_PRINTLN("System READY");
 }
 
 /***************************************************/
@@ -105,10 +117,10 @@ void loop() {
     if (millis() - lastHeartbeat > 2000) {
       lastHeartbeat = millis();
       if (!Firebase.RTDB.setInt(&fbdo, "/heartbeat", lastHeartbeat)) {
-        Serial.println("Heartbeat write failed");
-        Serial.println(fbdo.errorReason());
+        DEBUG_PRINTLN("Heartbeat write failed");
+        DEBUG_PRINTLN(fbdo.errorReason());
       } else {
-        Serial.println("Heartbeat sent");
+        DEBUG_PRINTLN("Heartbeat sent");
       }
     }
     // Monitor physical switch changes
@@ -137,13 +149,13 @@ void loop() {
  ***************************************************/
 void streamCallback(FirebaseStream data) {
 
-  Serial.println("🔥 CALLBACK FIRED");
+  DEBUG_PRINTLN("🔥 CALLBACK FIRED");
 
   if (!systemReady) return;
 
   String path = data.dataPath(); // e.g. "/sittingRoomLight/cmdId" or "/sittingRoomLight/value"
-  Serial.print("Stream Path: ");
-  Serial.println(path);
+  DEBUG_PRINT("Stream Path: ");
+  DEBUG_PRINTLN(path);
 
   // We will handle every event under /control children. Identify device.
   if (path.startsWith("/sittingRoomLight")) {
@@ -162,7 +174,7 @@ void streamCallback(FirebaseStream data) {
 }
 
 void streamTimeout(bool timeout) {
-  if (timeout) Serial.println("Firebase stream timeout");
+  if (timeout) DEBUG_PRINTLN("Firebase stream timeout");
 }
 
 /***************************************************
@@ -171,9 +183,9 @@ void streamTimeout(bool timeout) {
 bool readControlValueInt(const String &deviceKey, int &outValue) {
   String valuePath = "/control/" + deviceKey + "/value";
   if (!Firebase.RTDB.getInt(&fbdo, valuePath)) {
-    Serial.print("getInt failed for ");
-    Serial.println(valuePath);
-    Serial.println(fbdo.errorReason());
+    DEBUG_PRINT("getInt failed for ");
+    DEBUG_PRINTLN(valuePath);
+    DEBUG_PRINTLN(fbdo.errorReason());
     return false;
   }
   outValue = fbdo.intData();
@@ -195,14 +207,14 @@ bool readControlCmdId(const String &deviceKey, String &outCmdId) {
 void writeAckLastCmdId(const String &deviceKey, const String &cmdId) {
   String ackPath = "/feedbackMeta/" + deviceKey + "/lastCmdId";
   if (!Firebase.RTDB.setString(&fbdo, ackPath, cmdId)) {
-    Serial.print("Failed to write ack ");
-    Serial.println(ackPath);
-    Serial.println(fbdo.errorReason());
+    DEBUG_PRINT("Failed to write ack ");
+    DEBUG_PRINTLN(ackPath);
+    DEBUG_PRINTLN(fbdo.errorReason());
   } else {
-    Serial.print("Wrote ack ");
-    Serial.print(ackPath);
-    Serial.print(" = ");
-    Serial.println(cmdId);
+    DEBUG_PRINT("Wrote ack ");
+    DEBUG_PRINT(ackPath);
+    DEBUG_PRINT(" = ");
+    DEBUG_PRINTLN(cmdId);
   }
 }
 
@@ -211,28 +223,55 @@ void writeAckLastCmdId(const String &deviceKey, const String &cmdId) {
  *
  * Note: This now expects we call this when a new cmdId is detected.
  ***************************************************/
-void handleRelay(uint8_t index, int value) {
+/***void handleRelay(uint8_t index, int value) {
 
   uint8_t pin;
   int loadIndex=-1;
 
   switch (index) {
-    case 1: pin = sittingRoomLightRelayPin; loadIndex = LOAD_SITTING; break;
-    case 2: pin = bedRoomLightRelayPin; loadIndex = LOAD_BEDROOM; break;
-    case 3: pin = sittingRoomSocketRelayPin; break;
-    case 4: pin = bedRoomSocketRelayPin; break;
+    case 1: pin = sittingRoomLightRelayPin; loadIndex = LOAD_SITTING; digitalWrite(pin, value ? HIGH : LOW); break;
+    case 2: pin = bedRoomLightRelayPin; loadIndex = LOAD_BEDROOM; digitalWrite(pin, value ? HIGH : LOW); break;
+    case 3: pin = sittingRoomSocketRelayPin; digitalWrite(pin, value ? LOW : HIGH); break;
+    case 4: pin = bedRoomSocketRelayPin; digitalWrite(pin, value ? LOW : HIGH); break;
     default: return;
   }
-
-  digitalWrite(pin, value ? HIGH : LOW);
 
   // FORCE feedback sync (write the scalar feedback - unchanged behavior)
   if (loadIndex != -1) {
     // Pass true to write whatever the current load reads even if unchanged
     updateLoadFeedback(loadIndex, true);
   }
-}
+}***/
+void handleRelay(uint8_t index, int value) {
+  uint8_t relayPin;
+  int loadIndex = -1;
 
+  // Map the index to the correct relay and feedback load
+  switch (index) {
+    case 1: relayPin = sittingRoomLightRelayPin; loadIndex = LOAD_SITTING; break;
+    case 2: relayPin = bedRoomLightRelayPin;    loadIndex = LOAD_BEDROOM; break;
+    case 3: digitalWrite(sittingRoomSocketRelayPin, value ? LOW : HIGH); return; // Sockets usually don't have 2-way feedback
+    case 4: digitalWrite(bedRoomSocketRelayPin, value ? LOW : HIGH); return;
+    default: return;
+  }
+
+  // --- THE 2-WAY FIX ---
+  // 1. Check what the light is ACTUALLY doing right now via the feedback pin
+  int currentActualState = readLoad(loadIndex); 
+
+  // 2. Compare actual state to what the user requested from the app
+  // If the app wants it ON (1) but it's OFF (0), or vice versa...
+  if (value != currentActualState) {
+    DEBUG_PRINTLN("State mismatch detected. Toggling relay to sync...");
+    
+    // 3. Flip the relay state (if it was HIGH, make it LOW; if LOW, make it HIGH)
+    bool currentRelayPos = digitalRead(relayPin);
+    digitalWrite(relayPin, !currentRelayPos);
+  }
+
+  // 4. Immediately update Firebase so the UI reflects the real-world state
+  updateLoadFeedback(loadIndex, true);
+}
 /***************************************************
  * Read and process control children for relays
  ***************************************************/
@@ -257,10 +296,10 @@ void handleControlForDevice(const String &deviceKey, uint8_t index) {
     String rootPath = "/control/" + deviceKey;
     if (Firebase.RTDB.getInt(&fbdo, rootPath)) {
       int rootVal = fbdo.intData();
-      Serial.print("Legacy root value for ");
-      Serial.print(deviceKey);
-      Serial.print(" = ");
-      Serial.println(rootVal);
+      DEBUG_PRINT("Legacy root value for ");
+      DEBUG_PRINT(deviceKey);
+      DEBUG_PRINT(" = ");
+      DEBUG_PRINTLN(rootVal);
       handleRelay(index, rootVal);
     } else {
       // apply the value read from /control/<device>/value if any
@@ -272,10 +311,10 @@ void handleControlForDevice(const String &deviceKey, uint8_t index) {
   // If we have a cmdId, process only when it differs from last processed
   String last = (lastPtr != nullptr) ? *lastPtr : String("");
   if (cmdId != last) {
-    Serial.print("New cmdId for ");
-    Serial.print(deviceKey);
-    Serial.print(": ");
-    Serial.println(cmdId);
+    DEBUG_PRINT("New cmdId for ");
+    DEBUG_PRINT(deviceKey);
+    DEBUG_PRINT(": ");
+    DEBUG_PRINTLN(cmdId);
     // Apply command (relay)
     handleRelay(index, value);
 
@@ -285,8 +324,8 @@ void handleControlForDevice(const String &deviceKey, uint8_t index) {
     }
     writeAckLastCmdId(deviceKey, cmdId);
   } else {
-    Serial.print("Duplicate cmdId (ignored): ");
-    Serial.println(cmdId);
+    DEBUG_PRINT("Duplicate cmdId (ignored): ");
+    DEBUG_PRINTLN(cmdId);
   }
 }
 
@@ -297,10 +336,10 @@ void handleControlForDevice(const String &deviceKey, uint8_t index) {
  ***************************************************/
 int readLoad(uint8_t index) {
   if (index == LOAD_SITTING)
-    return digitalRead(sittingRoomLightFeedbackPin) == HIGH ? 0 : 1;
+    return digitalRead(sittingRoomLightFeedbackPin) == HIGH ? 1 : 0;
 
   if (index == LOAD_BEDROOM)
-    return digitalRead(bedRoomLightFeedbackPin) == HIGH ? 0 : 1;
+    return digitalRead(bedRoomLightFeedbackPin) == HIGH ? 1 : 0;
 
   return 0;
 }
@@ -311,7 +350,7 @@ int readLoad(uint8_t index) {
  * Modified to accept a 'forceWrite' parameter so we can
  * acknowledge commands even when the feedback value hasn't changed.
  ***************************************************/
-void updateLoadFeedback(uint8_t index, bool forceWrite=false) {
+void updateLoadFeedback(uint8_t index, bool forceWrite) {
   static int lastState[2] = { -1, -1 };
 
   int current = readLoad(index);
@@ -337,13 +376,13 @@ void updateLoadFeedback(uint8_t index, bool forceWrite=false) {
   }
 
   if (!ok) {
-    Serial.print("Feedback write failed: ");
-    Serial.println(fbdo.errorReason());
+    DEBUG_PRINT("Feedback write failed: ");
+    DEBUG_PRINTLN(fbdo.errorReason());
   } else {
-    Serial.print("Feedback OK index ");
-    Serial.print(index);
-    Serial.print(" = ");
-    Serial.println(current);
+    DEBUG_PRINT("Feedback OK index ");
+    DEBUG_PRINT(index);
+    DEBUG_PRINT(" = ");
+    DEBUG_PRINTLN(current);
   }
 }
 
@@ -400,10 +439,10 @@ void handleControlForServo(const String &deviceKey, uint8_t index) {
     String rootPath = "/control/" + deviceKey;
     if (Firebase.RTDB.getInt(&fbdo, rootPath)) {
       int rootVal = fbdo.intData();
-      Serial.print("Legacy servo root value for ");
-      Serial.print(deviceKey);
-      Serial.print(" = ");
-      Serial.println(rootVal);
+      DEBUG_PRINT("Legacy servo root value for ");
+      DEBUG_PRINT(deviceKey);
+      DEBUG_PRINT(" = ");
+      DEBUG_PRINTLN(rootVal);
       handleServo(index, rootVal);
     } else {
       handleServo(index, value);
@@ -418,16 +457,16 @@ void handleControlForServo(const String &deviceKey, uint8_t index) {
 
   String last = (lastPtr != nullptr) ? *lastPtr : String("");
   if (cmdId != last) {
-    Serial.print("New servo cmdId for ");
-    Serial.print(deviceKey);
-    Serial.print(": ");
-    Serial.println(cmdId);
+    DEBUG_PRINT("New servo cmdId for ");
+    DEBUG_PRINT(deviceKey);
+    DEBUG_PRINT(": ");
+    DEBUG_PRINTLN(cmdId);
     handleServo(index, value);
     if (lastPtr != nullptr) *lastPtr = cmdId;
     // Write an ack in feedbackMeta for servo too
     writeAckLastCmdId(deviceKey, cmdId);
   } else {
-    Serial.print("Duplicate servo cmdId (ignored): ");
-    Serial.println(cmdId);
+    DEBUG_PRINT("Duplicate servo cmdId (ignored): ");
+    DEBUG_PRINTLN(cmdId);
   }
 }
